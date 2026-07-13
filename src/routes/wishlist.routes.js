@@ -1,0 +1,24 @@
+// src/routes/wishlist.routes.js
+//
+// All wishlist endpoints require authentication - no optionalAuth here,
+// unlike product.routes.js's /search. Matches the route shapes from the
+// original PowerShell testing transcript: POST/GET /api/wishlist,
+// GET /api/wishlist/:id/history, DELETE /api/wishlist/:id.
+
+'use strict';
+
+const express = require('express');
+const asyncHandler = require('../utils/asyncHandler');
+const { requireAuth } = require('../middleware/auth.middleware');
+const wishlistController = require('../controllers/wishlist.controller');
+
+const router = express.Router();
+
+router.use(requireAuth); // applies to every route below - entire file requires auth
+
+router.post('/', asyncHandler(wishlistController.addItem));
+router.get('/', asyncHandler(wishlistController.getWishlist));
+router.get('/:id/history', asyncHandler(wishlistController.getItemHistory));
+router.delete('/:id', asyncHandler(wishlistController.removeItem));
+
+module.exports = router;
