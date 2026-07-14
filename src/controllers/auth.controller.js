@@ -27,25 +27,43 @@ function parseExpiryToMs(expiryString) {
     return value * unitMs[unit];
 }
 
+// Builds the cookie options object, omitting `domain` entirely unless
+// one was explicitly configured. An explicit Domain attribute makes a
+// cookie host-SPECIFIC (e.g. only ever sent back to exactly
+// "localhost") - omitting it makes the cookie host-ONLY, meaning it's
+// automatically scoped to whatever host actually served the response.
+// That's the correct default for portability: it works identically
+// whether the API is reached via localhost, 127.0.0.1, a raw IP in
+// testing, or a real production domain - all without config changes.
+// Only set COOKIE_DOMAIN explicitly if you need cross-SUBDOMAIN sharing
+// (e.g. api.example.com and app.example.com both need this cookie).
+function buildCookieOptions(extra) {
+    const options = Object.assign({
+            httpOnly: true,
+            secure: config.cookie.secure,
+            sameSite: 'lax',
+            path: '/api/auth',
+        },
+        extra
+    );
+
+    if (config.cookie.domain) {
+        options.domain = config.cookie.domain;
+    }
+
+    return options;
+}
+
 function setRefreshCookie(res, token) {
-    res.cookie(config.cookie.refreshCookieName, token, {
-        httpOnly: true, // inaccessible to frontend JS - the whole point, defends against XSS token theft
-        secure: config.cookie.secure, // true in production (HTTPS only), false for local http:// dev
-        sameSite: 'lax', // allows the cookie on top-level navigation, blocks most CSRF vectors
-        domain: config.cookie.domain,
-        maxAge: parseExpiryToMs(config.refreshToken.expiresIn),
-        path: '/api/auth', // only sent to auth endpoints - refresh/logout - not every request
-    });
+    res.cookie(
+        config.cookie.refreshCookieName,
+        token,
+        buildCookieOptions({ maxAge: parseExpiryToMs(config.refreshToken.expiresIn) })
+    );
 }
 
 function clearRefreshCookie(res) {
-    res.clearCookie(config.cookie.refreshCookieName, {
-        httpOnly: true,
-        secure: config.cookie.secure,
-        sameSite: 'lax',
-        domain: config.cookie.domain,
-        path: '/api/auth',
-    });
+    res.clearCookie(config.cookie.refreshCookieName, buildCookieOptions());
 }
 
 function getRequestMeta(req) {

@@ -94,7 +94,12 @@ const config = {
 
     cookie: {
         secure: getString('COOKIE_SECURE', 'false') === 'true',
-        domain: getString('COOKIE_DOMAIN', 'localhost'),
+        // No hardcoded default here anymore - see auth.controller.js's
+        // setRefreshCookie for why an explicit domain is actively harmful
+        // as a default (breaks any client accessing the API by IP or a
+        // different hostname than exactly what's configured, which is
+        // precisely what caused Supertest's cookie to silently not be sent).
+        domain: getString('COOKIE_DOMAIN', null),
         refreshCookieName: getString('REFRESH_COOKIE_NAME', 'refreshToken'),
     },
 
