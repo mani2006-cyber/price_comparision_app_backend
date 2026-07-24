@@ -9,6 +9,7 @@
 
 const Product = require('../models/Product.model');
 const PriceHistory = require('../models/PriceHistory.model');
+const cache = require('../utils/cache');
 
 // ── Reads ────────────────────────────────────────────────────────────
 
@@ -24,19 +25,12 @@ async function findManyByIds(ids) {
     return Product.find({ _id: { $in: ids } });
 }
 
-// Products not checked recently - used by the price-refresher job to
-// decide what's actually due for a re-check, instead of blindly
-// re-scraping everything on a fixed timer regardless of when it was
-// last looked at.
 async function findStale(olderThanDate, limit) {
     return Product.find({ lastCheckedAt: { $lt: olderThanDate } })
         .sort({ lastCheckedAt: 1 })
         .limit(limit || 100);
 }
 
-// Basic text search fallback across our own cached catalog. Not used by
-// any service yet, but the repository layer should expose the full
-// range of sensible query shapes up front - see file header comment.
 async function searchByText(query, limit) {
     return Product.find({ $text: { $search: query } }, { score: { $meta: 'textScore' } })
         .sort({ score: { $meta: 'textScore' } })
@@ -45,16 +39,6 @@ async function searchByText(query, limit) {
 
 // ── Writes ───────────────────────────────────────────────────────────
 
-// The single entry point every provider adapter's normalized output
-// flows through. Handles: create-if-new, price-change detection,
-// price-extreme (lowest/highest) tracking, and lastCheckedAt bookkeeping.
-//
-// providerData shape (produced by adapters, validated by the service
-// layer before this is called):
-//   { marketplace, externalId, title, brand, category, images,
-//     currentPrice, originalPrice, currency, rating, seller,
-//     availability, delivery, rawUrl, keywords, attributes,
-//     fetchedVia, metadata }
 async function upsertFromProviderData(providerData, session) {
     const options = session ? { session } : {};
 
@@ -66,9 +50,6 @@ async function upsertFromProviderData(providerData, session) {
     const now = new Date();
 
     if (!existing) {
-        // Brand new product - Product.model.js's pre('save') hook handles
-        // slug generation, discount % calculation, and initializing
-        // lowestPrice/highestPrice to currentPrice.
         const created = await Product.create(
             [Object.assign({}, providerData, { lastCheckedAt: now, lastPriceChangedAt: now })],
             options
@@ -81,7 +62,7 @@ async function upsertFromProviderData(providerData, session) {
     const update = Object.assign({}, providerData, { lastCheckedAt: now });
 
     // findByIdAndUpdate below is a QUERY-level operation - it does NOT run
-    // Product.model.js's pre('save') hook, which is where discountPercentage
+    // Product.model.js's pre('save') hook, where discountPercentage
     // normally gets auto-computed. Without this, every update after the
     // first would silently overwrite a correct discountPercentage with the
     // adapter's default null. Same rule as the model: trust an adapter-
@@ -95,6 +76,7 @@ async function upsertFromProviderData(providerData, session) {
         const raw = ((update.originalPrice - update.currentPrice) / update.originalPrice) * 100;
         update.discountPercentage = Math.round(raw * 10) / 10;
     }
+
     if (priceChanged) {
         update.lastPriceChangedAt = now;
         update.lowestPrice = Math.min(existing.lowestPrice, providerData.currentPrice);
@@ -117,6 +99,13 @@ async function upsertFromProviderData(providerData, session) {
             [{ productId: existing._id, price: providerData.currentPrice, recordedAt: now }],
             options
         );
+
+        // Invalidate any cached GET /api/products/:id response for this
+        // product - it now holds a stale price. Search-result caches are
+        // deliberately left to expire via their own short TTL instead: a
+        // single product can appear in many different query/sort/platform
+        // cache entries, and enumerating/purging all of them isn't practical.
+        await cache.del('product:' + existing._id.toString());
     }
 
     return { product: updated, priceChanged, isNew: false };

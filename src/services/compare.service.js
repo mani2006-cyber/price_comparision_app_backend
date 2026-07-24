@@ -61,15 +61,10 @@ async function compareByUrl(url) {
 
     // ── 4. Rank using title + spec + price signals combined - title
     // similarity alone can't tell "128GB" from "256GB" apart, since both
-    // share nearly every other word. See similarity.js for the weighting.
     const ranked = rankByCombinedMatch(originalProduct, candidates);
 
     // Keep only the SINGLE best-scoring match per marketplace. A scraper
     // commonly returns several rows for one real listing (color/variant
-    // duplicates, as seen with the 4 iPhone 16 color variants above) -
-    // a comparison view should show "the best match on Flipkart", not
-    // every variant Flipkart happens to carry. First occurrence per
-    // marketplace wins, since `ranked` is already sorted best-first.
     const bestPerMarketplace = {};
     ranked.forEach(function(item) {
         if (item.similarityScore < config.compare.similarityThreshold) return;

@@ -16,6 +16,54 @@ const { withDefaults, validateProviderProduct, validateProviderProductList } = r
 const BASE = 'https://www.amazon.in';
 const MAX_SEARCH_RESULTS = 8;
 
+// ── Retry configuration ─────────────────────────────────────────────
+const MAX_RETRIES = 4; // total attempts = MAX_RETRIES + 1
+const BASE_DELAY_MS = 1000; // first retry waits ~1s
+const MAX_DELAY_MS = 15000; // cap backoff at 15s
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ── Circuit breaker ──────────────────────────────────────────────────
+// If Amazon is sustaining a block (not just a transient blip), retrying
+// every single call wastes time and makes the block worse. After enough
+// consecutive full-retry failures, short-circuit for a cooldown window
+// so callers (e.g. the auto-mode orchestrator) can fail fast to another
+// provider instead of waiting ~13s per request for a doomed retry chain.
+const CIRCUIT_FAILURE_THRESHOLD = 3;
+const CIRCUIT_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+
+let consecutiveFailures = 0;
+let circuitOpenUntil = 0;
+
+function circuitIsOpen() {
+    return Date.now() < circuitOpenUntil;
+}
+
+function recordFailure() {
+    consecutiveFailures++;
+    if (consecutiveFailures >= CIRCUIT_FAILURE_THRESHOLD) {
+        circuitOpenUntil = Date.now() + CIRCUIT_COOLDOWN_MS;
+        logger.error('Amazon scraper: circuit breaker OPEN, pausing scraper calls', {
+            consecutiveFailures,
+            cooldownMs: CIRCUIT_COOLDOWN_MS,
+        });
+    }
+}
+
+function recordSuccess() {
+    consecutiveFailures = 0;
+    circuitOpenUntil = 0;
+}
+
+// Exponential backoff with jitter, e.g. attempt 0 -> ~1s, 1 -> ~2s, 2 -> ~4s, 3 -> ~8s (capped)
+function backoffDelay(attempt) {
+    const exp = BASE_DELAY_MS * Math.pow(2, attempt);
+    const jitter = Math.random() * 500;
+    return Math.min(exp + jitter, MAX_DELAY_MS);
+}
+
 function getHeaders(referer) {
     return {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -30,14 +78,100 @@ function getHeaders(referer) {
     };
 }
 
+// Fetches a URL, retrying on 503 (and on network/5xx errors) with a sleep-based
+// exponential backoff. Honors the Retry-After header when Amazon sends one.
 async function fetchHtml(url, referer) {
-    const response = await axios.get(url, {
-        headers: getHeaders(referer),
-        timeout: 20000,
-        decompress: true,
-        maxRedirects: 5,
-    });
-    return response.data;
+    if (circuitIsOpen()) {
+        const waitMs = circuitOpenUntil - Date.now();
+        throw new Error(
+            'Amazon scraper: circuit breaker open (cooling down for ' +
+            Math.ceil(waitMs / 1000) + 's more) - skipping request to ' + url
+        );
+    }
+
+    let lastErr;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            const response = await axios.get(url, {
+                headers: getHeaders(referer),
+                timeout: 20000,
+                decompress: true,
+                maxRedirects: 5,
+                // Let us inspect 503s ourselves instead of axios throwing immediately
+                validateStatus: (status) => status === 200 || status === 503,
+            });
+
+            if (response.status === 200) {
+                recordSuccess();
+                return response.data;
+            }
+
+            // status === 503 here - check whether this is really a bot-block/captcha
+            // page rather than a transient "server busy" response. If so, retrying
+            // harder won't help; log it once so it's diagnosable.
+            const bodySnippet = String(response.data || '').slice(0, 300);
+            const looksLikeBotBlock = /captcha|Robot Check|automated access|unusual traffic/i.test(bodySnippet);
+
+            if (attempt === MAX_RETRIES) {
+                logger.error('Amazon scraper: 503 response body preview', { url, bodySnippet, looksLikeBotBlock });
+                recordFailure();
+                throw new Error('Amazon returned 503 after ' + (MAX_RETRIES + 1) + ' attempts: ' + url);
+            }
+
+            if (looksLikeBotBlock) {
+                logger.warn('Amazon scraper: 503 looks like a bot-detection page, not transient load', {
+                    url,
+                    bodySnippet,
+                });
+            }
+
+            const retryAfterHeader = response.headers && response.headers['retry-after'];
+            const delay = retryAfterHeader ?
+                parseInt(retryAfterHeader, 10) * 1000 :
+                backoffDelay(attempt);
+
+            logger.warn('Amazon scraper: got 503, retrying after sleep', {
+                url,
+                attempt: attempt + 1,
+                maxAttempts: MAX_RETRIES + 1,
+                delayMs: delay,
+            });
+
+            await sleep(delay);
+            continue;
+
+        } catch (err) {
+            lastErr = err;
+
+            // Network-level errors (timeout, DNS, connection reset, etc.) - retry these too
+            const isLastAttempt = attempt === MAX_RETRIES;
+            const status = err.response && err.response.status;
+
+            if (isLastAttempt) {
+                logger.error('Amazon scraper: request failed, giving up', {
+                    url,
+                    attempt: attempt + 1,
+                    status: status || null,
+                    message: err.message,
+                });
+                throw err;
+            }
+
+            const delay = backoffDelay(attempt);
+            logger.warn('Amazon scraper: request error, retrying after sleep', {
+                url,
+                attempt: attempt + 1,
+                status: status || null,
+                message: err.message,
+                delayMs: delay,
+            });
+            await sleep(delay);
+        }
+    }
+
+    // Should not be reached, but keep a safety net
+    throw lastErr || new Error('Amazon scraper: fetchHtml failed for unknown reason: ' + url);
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────

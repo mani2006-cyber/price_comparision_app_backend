@@ -14,6 +14,7 @@ const logger = require('./src/utils/logger');
 const { connectDB, disconnectDB } = require('./src/config/db');
 const app = require('./src/app');
 const priceRefresherJob = require("./src/jobs/priceRefresher.Job")
+const { disconnectRedis } = require('./src/config/redis');
 
 const SHUTDOWN_TIMEOUT_MS = 10000;
 
@@ -62,6 +63,7 @@ function shutdown(signal) {
         // requests have already finished by the time this callback fires.
         try {
             await disconnectDB();
+            await disconnectRedis();
             clearTimeout(forceExitTimer);
             logger.info('Shutdown complete');
             process.exit(0);

@@ -109,9 +109,25 @@ const config = {
         ttlSeconds: getNumber('CACHE_TTL_SECONDS', 600),
     },
 
+    redis: {
+        enabled: getString('REDIS_ENABLED', 'true') === 'true',
+        url: getString('REDIS_URL', 'redis://127.0.0.1:6379'),
+        keyPrefix: getString('REDIS_KEY_PREFIX', 'pricecompare:'),
+    },
+
+    cacheTtl: {
+        search: getNumber('CACHE_SEARCH_TTL_SECONDS', 300),
+        product: getNumber('CACHE_PRODUCT_TTL_SECONDS', 300),
+        compare: getNumber('CACHE_COMPARE_TTL_SECONDS', 600),
+    },
+
     rateLimit: {
         windowMs: getNumber('RATE_LIMIT_WINDOW_MS', 60000),
         max: getNumber('RATE_LIMIT_MAX', 20),
+    },
+    authRateLimit: {
+        windowMs: getNumber('AUTH_RATE_LIMIT_WINDOW_MS', 15 * 60 * 1000),
+        max: getNumber('AUTH_RATE_LIMIT_MAX', 10),
     },
 
     corsOrigins: getCsvList('CORS_ORIGINS', ['http://localhost:5173']),
