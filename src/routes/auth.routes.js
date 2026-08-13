@@ -10,6 +10,8 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const asyncHandler = require('../utils/asyncHandler');
+const validate = require('../middleware/validate.middleware');
+const { signupBodySchema, loginBodySchema } = require('../validators/auth.validators');
 const authController = require('../controllers/auth.controller');
 const config = require('../config/env');
 
@@ -28,8 +30,11 @@ const authRateLimiter = rateLimit({
     legacyHeaders: false,
 });
 
-router.post('/signup', authRateLimiter, asyncHandler(authController.signup));
-router.post('/login', authRateLimiter, asyncHandler(authController.login));
+// authRateLimiter runs BEFORE validate() - rate limiting has to count
+// every attempt, including malformed ones, or an attacker could send
+// intentionally-invalid bodies forever without ever tripping it.
+router.post('/signup', authRateLimiter, validate({ body: signupBodySchema }), asyncHandler(authController.signup));
+router.post('/login', authRateLimiter, validate({ body: loginBodySchema }), asyncHandler(authController.login));
 router.post('/refresh', asyncHandler(authController.refresh));
 router.post('/logout', asyncHandler(authController.logout));
 

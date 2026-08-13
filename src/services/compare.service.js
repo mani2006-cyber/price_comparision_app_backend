@@ -27,7 +27,7 @@ async function compareByUrl(url) {
         // itself ever fails or returns something unexpected, the user
         // should still get a clean 400, not a TypeError while we were
         // constructing the ERROR message for a different problem.
-        let activeList = 'amazon, flipkart, myntra, lenskart';
+        let activeList = 'amazon, flipkart, myntra, lenskart, nykaa, poorvika, vijaysales';
         try {
             const active = adapters.getActiveMarketplaces();
             if (Array.isArray(active) && active.length > 0) {

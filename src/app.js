@@ -26,9 +26,30 @@ const app = express();
 // ── Core middleware ─────────────────────────────────────────────────
 // credentials: true is REQUIRED for the refresh-token cookie (File 39)
 // to be sent cross-origin at all - and per the cors package's own
-// behavior, that requires an explicit origin list, never '*'.
+// behavior, that requires an explicit origin, never '*'.
+//
+// LOCALHOST_ORIGIN_RE reflects any http(s)://localhost:<port> or
+// 127.0.0.1:<port> origin - covers a frontend dev server landing on a
+// different port every run (Vite bumping 5173 -> 5175 etc.) without
+// having to hand-edit CORS_ORIGINS every time. Deliberately NOT a bare
+// '*'/reflect-anything origin: with credentials: true, that would let
+// ANY website make authenticated requests against this API using a
+// logged-in user's cookies - scoping the wildcard to localhost keeps
+// the convenience without that exposure. Anything else still has to be
+// in config.corsOrigins explicitly (e.g. a real deployed frontend
+// origin in production).
+const LOCALHOST_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
 app.use(cors({
-    origin: config.corsOrigins,
+    origin: function(origin, callback) {
+        // No Origin header at all (curl, server-to-server, same-origin) -
+        // nothing to check against, always allow.
+        if (!origin) return callback(null, true);
+        if (LOCALHOST_ORIGIN_RE.test(origin) || config.corsOrigins.indexOf(origin) !== -1) {
+            return callback(null, true);
+        }
+        return callback(new Error('Not allowed by CORS: ' + origin));
+    },
     credentials: true,
 }));
 app.use(express.json());

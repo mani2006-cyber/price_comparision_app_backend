@@ -8,7 +8,6 @@
 'use strict';
 
 const config = require('../config/env');
-const ApiError = require('../utils/ApiError');
 const authService = require('../services/auth.service');
 
 // ── Cookie helpers ───────────────────────────────────────────────────
@@ -73,21 +72,13 @@ function getRequestMeta(req) {
     };
 }
 
-// ── Basic presence validation (see file header note re: future validators) ──
-function requireFields(body, fields) {
-    for (let i = 0; i < fields.length; i++) {
-        const field = fields[i];
-        if (!body[field] || typeof body[field] !== 'string' || body[field].trim() === '') {
-            throw ApiError.badRequest('Missing or invalid field: ' + field);
-        }
-    }
-}
-
 // ── Handlers ─────────────────────────────────────────────────────────
+// Request body shape/presence is validated by validate.middleware.js +
+// src/validators/auth.validators.js at the route layer (auth.routes.js)
+// before either handler below ever runs - req.body.name/email/password
+// are guaranteed present, non-empty, and (for email) well-formed here.
 
 async function signup(req, res) {
-    requireFields(req.body, ['name', 'email', 'password']);
-
     const result = await authService.signup(
         req.body.name.trim(),
         req.body.email.trim(),
@@ -105,8 +96,6 @@ async function signup(req, res) {
 }
 
 async function login(req, res) {
-    requireFields(req.body, ['email', 'password']);
-
     const result = await authService.login(
         req.body.email.trim(),
         req.body.password,

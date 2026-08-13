@@ -23,7 +23,8 @@
 //
 // ProviderProduct shape (matches Product.model.js exactly):
 // {
-//   marketplace: 'amazon' | 'flipkart' | 'myntra' | 'ajio' | 'lenskart',  // required
+//   marketplace: 'amazon' | 'flipkart' | 'myntra' | 'ajio' | 'lenskart' |
+//                'nykaa' | 'poorvika' | 'vijaysales',  // required
 //   externalId: string,        // required - STABLE id extracted from the URL (ASIN, pid, etc), NEVER random
 //   sku: string | null,
 //   title: string,             // required
@@ -51,7 +52,7 @@
 
 const REQUIRED_FIELDS = ['marketplace', 'externalId', 'title', 'currentPrice', 'rawUrl', 'fetchedVia'];
 
-const VALID_MARKETPLACES = ['amazon', 'flipkart', 'myntra', 'ajio', 'lenskart'];
+const VALID_MARKETPLACES = ['amazon', 'flipkart', 'myntra', 'ajio', 'lenskart', 'nykaa', 'poorvika', 'vijaysales'];
 const VALID_FETCHED_VIA = ['scraper', 'api'];
 const VALID_AVAILABILITY = ['in_stock', 'out_of_stock', 'limited', 'preorder', 'unknown'];
 

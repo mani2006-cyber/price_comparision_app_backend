@@ -16,6 +16,9 @@ const amazon = require('./amazon'); // ← back to the orchestrator, not amazon.
 const flipkart = require('./flipkart');
 const myntra = require('./myntra');
 const lenskart = require('./lenskart');
+const nykaa = require('./nykaa');
+const poorvika = require('./poorvika');
+const vijaysales = require('./vijaysales');
 
 // The single source of truth for which marketplaces are active. Ajio is
 // deliberately absent (no scraper was built for it) - nothing else in
@@ -25,6 +28,9 @@ const MARKETPLACE_REGISTRY = {
     flipkart,
     myntra,
     lenskart,
+    nykaa,
+    poorvika,
+    vijaysales,
 };
 
 function getActiveMarketplaces() {
@@ -107,6 +113,9 @@ function detectMarketplaceFromUrl(url) {
     if (lower.indexOf('flipkart.') !== -1) return 'flipkart';
     if (lower.indexOf('myntra.') !== -1) return 'myntra';
     if (lower.indexOf('lenskart.') !== -1) return 'lenskart';
+    if (lower.indexOf('nykaa.') !== -1) return 'nykaa';
+    if (lower.indexOf('poorvika.') !== -1) return 'poorvika';
+    if (lower.indexOf('vijaysales.') !== -1) return 'vijaysales';
 
     return null;
 }

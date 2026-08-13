@@ -80,8 +80,14 @@ ENV/
 # ==================================================
 # Machine Learning
 # ==================================================
+# NOTE: "models/" (bare, no leading slash) was here and is intentionally
+# removed - gitignore matches a bare directory name ANYWHERE in the
+# tree, which was silently matching this Node.js app's own src/models/
+# (Mongoose schemas) and tests/integration/models/ - neither of which
+# is an ML artifact. This project has no ML checkpoints to ignore; if
+# one is ever added, scope it explicitly (e.g. "/checkpoints/models/")
+# rather than reintroducing a bare "models/" that matches anywhere.
 checkpoints/
-models/
 *.pt
 *.pth
 *.ckpt

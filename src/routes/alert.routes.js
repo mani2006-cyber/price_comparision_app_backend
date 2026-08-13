@@ -10,13 +10,15 @@
 const express = require('express');
 const asyncHandler = require('../utils/asyncHandler');
 const { requireAuth } = require('../middleware/auth.middleware');
+const validate = require('../middleware/validate.middleware');
+const { createAlertBodySchema } = require('../validators/alert.validators');
 const alertController = require('../controllers/alert.controller');
 
 const router = express.Router();
 
 router.use(requireAuth);
 
-router.post('/', asyncHandler(alertController.createAlert));
+router.post('/', validate({ body: createAlertBodySchema }), asyncHandler(alertController.createAlert));
 router.get('/', asyncHandler(alertController.getAlerts));
 router.post('/:id/cancel', asyncHandler(alertController.cancelAlert));
 

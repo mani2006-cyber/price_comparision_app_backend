@@ -37,6 +37,20 @@ function normalizeError(err) {
         return ApiError.badRequest('Validation failed', details);
     }
 
+    // Zod: request validation failure from validate.middleware.js (query/
+    // body/params schemas in src/validators/). Same shape as the Mongoose
+    // branch above — one flat `message` (the first issue's, since that's
+    // usually the one a caller most needs to see/matches an existing
+    // hand-written message a route relied on) plus every issue in
+    // `details` for a client that wants field-level granularity.
+    if (err.name === 'ZodError' && Array.isArray(err.issues)) {
+        const details = err.issues.map(function(issue) {
+            return { field: issue.path.join('.'), message: issue.message };
+        });
+        const message = (err.issues[0] && err.issues[0].message) || 'Validation failed';
+        return ApiError.badRequest(message, details);
+    }
+
     // MongoDB duplicate key error (unique index violation) — same case
     // learn/routes/wishlist.js handled manually with `if (err.code === 11000)`.
     if (err.code === 11000) {

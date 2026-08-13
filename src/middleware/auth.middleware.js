@@ -21,6 +21,28 @@ function extractToken(req) {
     return header.slice('Bearer '.length).trim();
 }
 
+// Header-or-query variant, used ONLY by requireAuthForStream below - not
+// by requireAuth/optionalAuth, which stay header-only for every other
+// route. The browser's native EventSource API (what a client uses to
+// consume the SSE endpoint at GET /api/notifications/stream) cannot set
+// custom request headers, so the Authorization: Bearer convention this
+// app uses everywhere else isn't available for that one route - the
+// access token has to travel as a `?token=` query param instead. Query
+// strings can leak into proxy/access logs and browser history in a way
+// a header does not, so this fallback is scoped as narrowly as possible
+// (one dedicated middleware, one route) rather than added to the shared
+// extractToken() every other endpoint relies on.
+function extractTokenFromHeaderOrQuery(req) {
+    const fromHeader = extractToken(req);
+    if (fromHeader) {
+        return fromHeader;
+    }
+    if (req.query && typeof req.query.token === 'string' && req.query.token.trim() !== '') {
+        return req.query.token.trim();
+    }
+    return null;
+}
+
 // ── Required auth - throws if missing/invalid ──────────────────────
 function requireAuth(req, res, next) {
     const token = extractToken(req);
@@ -60,4 +82,23 @@ function optionalAuth(req, res, next) {
     next();
 }
 
-module.exports = { requireAuth, optionalAuth };
+// ── Required auth, header OR ?token= query param - see
+// extractTokenFromHeaderOrQuery's own comment for why this exists as a
+// separate function instead of a flag on requireAuth ─────────────────
+function requireAuthForStream(req, res, next) {
+    const token = extractTokenFromHeaderOrQuery(req);
+
+    if (!token) {
+        return next(ApiError.unauthorized('No access token provided'));
+    }
+
+    try {
+        const decoded = jwt.verify(token, config.accessToken.secret);
+        req.userId = decoded.userId;
+        next();
+    } catch (err) {
+        next(ApiError.unauthorized('Invalid or expired access token'));
+    }
+}
+
+module.exports = { requireAuth, optionalAuth, requireAuthForStream };

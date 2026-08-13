@@ -9,21 +9,17 @@
 
 'use strict';
 
-const ApiError = require('../utils/ApiError');
 const alertService = require('../services/alert.service');
 
+// Request body shape/presence/numeric-well-formedness is validated by
+// validate.middleware.js + src/validators/alert.validators.js at the
+// route layer (alert.routes.js) before this ever runs - req.body.productId
+// and req.body.targetPrice (already coerced to a real positive number)
+// are guaranteed here. The "targetPrice must be lower than the current
+// price" business rule still lives in alert.service.js - it needs
+// product data this layer doesn't have.
 async function createAlert(req, res) {
-    const productId = req.body.productId;
-    if (!productId || typeof productId !== 'string') {
-        throw ApiError.badRequest("A 'productId' is required");
-    }
-
-    const targetPrice = Number(req.body.targetPrice);
-    if (!Number.isFinite(targetPrice) || targetPrice <= 0) {
-        throw ApiError.badRequest("A positive numeric 'targetPrice' is required");
-    }
-
-    const alert = await alertService.createAlert(req.userId, productId, targetPrice);
+    const alert = await alertService.createAlert(req.userId, req.body.productId, req.body.targetPrice);
     res.status(201).json({ success: true, alert });
 }
 

@@ -66,6 +66,30 @@ describe('GET /api/search', function() {
         expect(res.body.error).toContain("'q'");
     });
 
+    it('returns 400 when q is whitespace-only, before ever reaching the adapters', async function() {
+        const res = await request(app).get('/api/search').query({ q: '   ' });
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain("'q'");
+        expect(adapters.searchAllMarketplaces).not.toHaveBeenCalled();
+    });
+
+    it('returns 400 with field-level details for an unrecognized sortBy value', async function() {
+        const res = await request(app).get('/api/search').query({ q: 'laptop', sortBy: 'bogus' });
+        expect(res.status).toBe(400);
+        expect(res.body.details).toEqual(
+            expect.arrayContaining([expect.objectContaining({ field: 'sortBy' })])
+        );
+    });
+
+    it('accepts a valid sortBy and passes the trimmed q through to the adapters', async function() {
+        adapters.searchAllMarketplaces.mockResolvedValue({ results: [fakeProduct()], failures: [] });
+
+        const res = await request(app).get('/api/search').query({ q: '  laptop  ', sortBy: 'price_asc' });
+
+        expect(res.status).toBe(200);
+        expect(adapters.searchAllMarketplaces).toHaveBeenCalledWith('laptop', expect.objectContaining({ sortBy: 'price_asc' }));
+    });
+
     it('records search history when authenticated', async function() {
         adapters.searchAllMarketplaces.mockResolvedValue({ results: [fakeProduct()], failures: [] });
 
@@ -129,5 +153,32 @@ describe('POST /api/compare-url', function() {
         const res = await request(app).post('/api/compare-url').send({ url: 'https://www.ebay.com/itm/123' });
 
         expect(res.status).toBe(400);
+    });
+
+    it('returns 400 for a malformed url, before ever calling detectMarketplaceFromUrl', async function() {
+        const res = await request(app).post('/api/compare-url').send({ url: 'not-a-url' });
+
+        expect(res.status).toBe(400);
+        expect(adapters.detectMarketplaceFromUrl).not.toHaveBeenCalled();
+    });
+
+    it('returns 400 when url is missing from the body entirely', async function() {
+        const res = await request(app).post('/api/compare-url').send({});
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toContain("'url'");
+    });
+
+    it('works for a supported Vijay Sales URL - the real marketplace added in this session', async function() {
+        adapters.detectMarketplaceFromUrl.mockReturnValue('vijaysales');
+        adapters.searchByLink.mockResolvedValue(fakeProduct({ marketplace: 'vijaysales', externalId: 'ROUTETEST1' }));
+        adapters.searchAllMarketplaces.mockResolvedValue({ results: [], failures: [] });
+
+        const res = await request(app)
+            .post('/api/compare-url')
+            .send({ url: 'https://www.vijaysales.com/p/P1/1/apple-iphone-16-black' });
+
+        expect(res.status).toBe(200);
+        expect(res.body.result.detectedMarketplace).toBe('vijaysales');
     });
 });

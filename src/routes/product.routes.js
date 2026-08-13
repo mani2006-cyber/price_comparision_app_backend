@@ -17,6 +17,8 @@ const asyncHandler = require('../utils/asyncHandler');
 const { requireAuth, optionalAuth } = require('../middleware/auth.middleware');
 const { createLimiter } = require('../middleware/rateLimiter.middleware');
 const { cacheResponse } = require('../middleware/cache.middleware');
+const validate = require('../middleware/validate.middleware');
+const { searchQuerySchema, compareUrlBodySchema } = require('../validators/product.validators');
 const config = require('../config/env');
 const productController = require('../controllers/product.controller');
 
@@ -57,12 +59,14 @@ const compareCache = cacheResponse({
     keyBuilder: function(req) { return String(req.body.url || '').trim(); },
 });
 
-router.get('/search', optionalAuth, searchCache, asyncHandler(productController.search));
+// validate() runs before optionalAuth/searchCache/compareCache - fail
+// fast on a malformed request before touching auth or the cache layer.
+router.get('/search', validate({ query: searchQuerySchema }), optionalAuth, searchCache, asyncHandler(productController.search));
 router.get('/search/history', requireAuth, asyncHandler(productController.getSearchHistory));
 router.delete('/search/history/:id', requireAuth, asyncHandler(productController.deleteSearchHistoryItem));
 
 router.get('/products/:id', productDetailCache, asyncHandler(productController.getProductDetail));
 
-router.post('/compare-url', compareLimiter, compareCache, asyncHandler(productController.compareUrl));
+router.post('/compare-url', validate({ body: compareUrlBodySchema }), compareLimiter, compareCache, asyncHandler(productController.compareUrl));
 
 module.exports = router;

@@ -7,16 +7,14 @@
 
 'use strict';
 
-const ApiError = require('../utils/ApiError');
 const wishlistService = require('../services/wishlist.service');
 
+// Request body shape/presence is validated by validate.middleware.js +
+// src/validators/wishlist.validators.js at the route layer
+// (wishlist.routes.js) before this ever runs - req.body.productId is
+// guaranteed present here.
 async function addItem(req, res) {
-    const productId = req.body.productId;
-    if (!productId || typeof productId !== 'string') {
-        throw ApiError.badRequest("A 'productId' is required");
-    }
-
-    const item = await wishlistService.addToWishlist(req.userId, productId, req.body.notes);
+    const item = await wishlistService.addToWishlist(req.userId, req.body.productId, req.body.notes);
     res.status(201).json({ success: true, item });
 }
 
