@@ -13,7 +13,7 @@ const { rapidApiGet } = require('../shared/rapidApiClient');
 const { withDefaults, validateProviderProduct, validateProviderProductList } = require('../provider.interface');
 
 const BASE = 'https://real-time-amazon-data.p.rapidapi.com';
-const MAX_SEARCH_RESULTS = 20;
+const MAX_SEARCH_RESULTS = config.apiSearch.maxResults;
 
 function getCredentials() {
     return {
@@ -124,7 +124,7 @@ function mapProductDetail(data) {
         [];
 
     const images = Array.isArray(data.product_photos) && data.product_photos.length > 0 ?
-        data.product_photos.slice(0, 10) :
+        data.product_photos.slice(0, config.product.maxImages) :
         (data.product_photo ? [data.product_photo] : []);
 
     return withDefaults({

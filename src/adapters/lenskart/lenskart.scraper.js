@@ -11,10 +11,11 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const logger = require('../../utils/logger');
+const config = require('../../config/env');
 const { withDefaults, validateProviderProduct, validateProviderProductList } = require('../provider.interface');
 
 const BASE = 'https://www.lenskart.com';
-const MAX_SEARCH_RESULTS = 8;
+const MAX_SEARCH_RESULTS = config.scraper.maxSearchResults;
 
 // Lenskart has no free-text search - it's category-browsing based.
 // Maps common query terms to real category pages; anything unmatched
@@ -61,7 +62,7 @@ function getHeaders(referer) {
 async function fetchHtml(url, referer) {
     const response = await axios.get(url, {
         headers: getHeaders(referer),
-        timeout: 20000,
+        timeout: config.scraper.timeoutMs,
         decompress: true,
         maxRedirects: 5,
     });
@@ -170,7 +171,7 @@ function buildProviderProduct(d) {
         title,
         brand: cleanText(d.brandName),
         category: cleanText(d.classification) || 'Eyewear',
-        images: gallery.slice(0, 10),
+        images: gallery.slice(0, config.product.maxImages),
         currentPrice: prices.current,
         originalPrice: prices.original,
         currency: 'INR',

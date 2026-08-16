@@ -13,6 +13,7 @@
 const notificationService = require('../services/notification.service');
 const notificationBus = require('../realtime/notificationBus');
 const logger = require('../utils/logger');
+const config = require('../config/env');
 
 // How often to write a comment-only "ping" line while nothing real is
 // happening. Two jobs: (1) keeps the connection alive through any
@@ -21,7 +22,7 @@ const logger = require('../utils/logger');
 // go between notifications: (2) lets the server detect a half-open
 // connection (client vanished without a clean TCP close, e.g. a lost
 // wifi connection) once a write to it starts failing.
-const SSE_HEARTBEAT_MS = 25000;
+const SSE_HEARTBEAT_MS = config.sse.heartbeatMs;
 
 async function getInbox(req, res) {
     const limit = req.query.limit ? parseInt(req.query.limit, 10) : undefined;

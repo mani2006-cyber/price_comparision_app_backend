@@ -8,6 +8,7 @@
 'use strict';
 
 const { z } = require('zod');
+const config = require('../config/env');
 
 const SORT_BY_VALUES = ['price_asc', 'price_desc', 'rating'];
 
@@ -43,12 +44,12 @@ const compareUrlBodySchema = z.object({
 
 // GET /api/categories/:category/products - page/limit arrive as query
 // strings, hence z.coerce.number() (same reasoning as alert.validators.js's
-// targetPrice) rather than z.number(). limit is capped at 50 so a client
-// can't force an unbounded page size through the cache layer.
+// targetPrice) rather than z.number(). limit is capped (config.category.maxLimit)
+// so a client can't force an unbounded page size through the cache layer.
 const categoryProductsQuerySchema = z.object({
     sortBy: z.enum(SORT_BY_VALUES).optional(),
     page: z.coerce.number("'page' must be a number").int().min(1).optional(),
-    limit: z.coerce.number("'limit' must be a number").int().min(1).max(50).optional(),
+    limit: z.coerce.number("'limit' must be a number").int().min(1).max(config.category.maxLimit).optional(),
 });
 
 module.exports = {

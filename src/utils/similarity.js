@@ -14,6 +14,8 @@
 
 'use strict';
 
+const config = require('../config/env');
+
 // Common words that appear in almost every product title and add no
 // real signal about WHICH product it is - excluding them improves
 // matching accuracy.
@@ -105,8 +107,8 @@ function specMatchScore(titleA, titleB) {
 // previous version scored price at only 15% weight, which let generic
 // shared words ("Apple", "Camera") in an accessory's title outvote an
 // enormous, obvious price mismatch. Gate first, THEN score what passes.
-const MIN_PRICE_RATIO = 0.4;
-const MAX_PRICE_RATIO = 2.5;
+const MIN_PRICE_RATIO = config.compare.minPriceRatio;
+const MAX_PRICE_RATIO = config.compare.maxPriceRatio;
 
 function passesPriceGate(priceA, priceB) {
     if (!priceA || !priceB || priceA <= 0 || priceB <= 0) return true; // can't evaluate - don't block on missing data
@@ -129,7 +131,7 @@ function priceProximityScore(priceA, priceB) {
 // Without this gate, a low-but-nonzero title score could still be
 // rescued by a NEUTRAL (0.5) spec score plus so-so price proximity,
 // which is exactly what let the Fujifilm camera through last run.
-const MIN_TITLE_SIMILARITY = 0.12;
+const MIN_TITLE_SIMILARITY = config.compare.minTitleSimilarity;
 
 function combinedMatchScore(original, candidate) {
     if (!passesPriceGate(original.currentPrice, candidate.currentPrice)) {

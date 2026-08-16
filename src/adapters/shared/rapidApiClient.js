@@ -11,8 +11,9 @@
 
 const axios = require('axios');
 const logger = require('../../utils/logger');
+const config = require('../../config/env');
 
-const TIMEOUT_MS = 10000;
+const TIMEOUT_MS = config.rapidApi.timeoutMs;
 
 class RapidApiError extends Error {
     constructor(message, statusCode, host) {

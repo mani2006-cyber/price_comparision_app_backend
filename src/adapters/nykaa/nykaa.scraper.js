@@ -26,10 +26,11 @@
 
 const axios = require('axios');
 const logger = require('../../utils/logger');
+const config = require('../../config/env');
 const { withDefaults, validateProviderProduct, validateProviderProductList } = require('../provider.interface');
 
 const BASE = 'https://www.nykaa.com';
-const MAX_SEARCH_RESULTS = 8;
+const MAX_SEARCH_RESULTS = config.scraper.maxSearchResults;
 
 function getHeaders(referer) {
     return {
@@ -43,7 +44,7 @@ function getHeaders(referer) {
 async function fetchHtml(url, referer) {
     const response = await axios.get(url, {
         headers: getHeaders(referer),
-        timeout: 20000,
+        timeout: config.scraper.timeoutMs,
         decompress: true,
         maxRedirects: 5,
     });
@@ -53,7 +54,7 @@ async function fetchHtml(url, referer) {
 async function fetchJson(url) {
     const response = await axios.get(url, {
         headers: Object.assign(getHeaders(BASE), { Accept: 'application/json' }),
-        timeout: 20000,
+        timeout: config.scraper.timeoutMs,
         decompress: true,
     });
     return response.data;
@@ -202,7 +203,7 @@ function parseProductPage(html, url) {
         title: cleanText(product.name),
         brand: brandFromJsonLd(product.brand),
         category: categoryFromBreadcrumb(breadcrumb),
-        images: imagesFromJsonLd(product.image).slice(0, 10),
+        images: imagesFromJsonLd(product.image).slice(0, config.product.maxImages),
         currentPrice,
         originalPrice,
         currency: ((product.offers && product.offers.priceCurrency) || 'INR').toUpperCase(),

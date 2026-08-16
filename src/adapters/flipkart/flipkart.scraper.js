@@ -11,10 +11,11 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const logger = require('../../utils/logger');
+const config = require('../../config/env');
 const { withDefaults, validateProviderProduct, validateProviderProductList } = require('../provider.interface');
 
 const BASE = 'https://www.flipkart.com';
-const MAX_SEARCH_RESULTS = 8;
+const MAX_SEARCH_RESULTS = config.scraper.maxSearchResults;
 
 function getHeaders() {
     return {
@@ -27,7 +28,7 @@ function getHeaders() {
 async function fetchHtml(url) {
     const response = await axios.get(url, {
         headers: getHeaders(),
-        timeout: 15000,
+        timeout: config.scraper.timeoutMs,
     });
     return response.data;
 }
@@ -185,7 +186,7 @@ function extractGalleryImages($) {
     }
 
     const highRes = collect(700);
-    return (highRes.length > 0 ? highRes : collect(200)).slice(0, 10);
+    return (highRes.length > 0 ? highRes : collect(200)).slice(0, config.product.maxImages);
 }
 
 function parseProductDetail(html, productUrl) {

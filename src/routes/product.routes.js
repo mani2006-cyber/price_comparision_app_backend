@@ -33,8 +33,8 @@ const productController = require('../controllers/product.controller');
 const router = express.Router();
 
 const compareLimiter = createLimiter({
-    windowMs: 60000,
-    max: 10,
+    windowMs: config.compareRateLimit.windowMs,
+    max: config.compareRateLimit.max,
     message: 'Too many comparison requests, please slow down',
 });
 

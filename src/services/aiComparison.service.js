@@ -94,8 +94,8 @@ async function generateComparisonSummary(originalProduct, matches) {
                     model: config.openRouter.model,
                     messages: [{ role: 'user', content: buildPrompt(originalProduct, matches) }],
                     stream: false,
-                    temperature: 0.4,
-                    maxTokens: 200,
+                    temperature: config.openRouter.temperature,
+                    maxTokens: config.openRouter.maxTokens,
                 },
             }),
             config.openRouter.timeoutMs

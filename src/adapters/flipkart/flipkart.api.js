@@ -12,7 +12,7 @@ const { rapidApiGet } = require('../shared/rapidApiClient');
 const { withDefaults, validateProviderProduct, validateProviderProductList } = require('../provider.interface');
 
 const BASE = 'https://real-time-flipkart-data2.p.rapidapi.com';
-const MAX_SEARCH_RESULTS = 20;
+const MAX_SEARCH_RESULTS = config.apiSearch.maxResults;
 
 // /product-details requires a pincode (affects delivery estimate only,
 // not product identity/price). Hardcoded default for now - candidate
@@ -81,7 +81,7 @@ function mapSearchItem(item) {
         sku: item.itemId || null,
         title: item.title,
         brand: item.brand || null,
-        images: Array.isArray(item.images) ? item.images.slice(0, 10) : [],
+        images: Array.isArray(item.images) ? item.images.slice(0, config.product.maxImages) : [],
         currentPrice,
         originalPrice: parsePrice(item.mrp),
         currency: 'INR',

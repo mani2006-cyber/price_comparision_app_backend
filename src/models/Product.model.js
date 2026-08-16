@@ -9,11 +9,12 @@
 'use strict';
 
 const mongoose = require('mongoose');
+const config = require('../config/env');
 
 const MARKETPLACES = ['amazon', 'flipkart', 'myntra', 'ajio', 'lenskart', 'nykaa', 'poorvika', 'vijaysales'];
 const AVAILABILITY_VALUES = ['in_stock', 'out_of_stock', 'limited', 'preorder', 'unknown'];
 const STATUS_VALUES = ['active', 'unavailable', 'discontinued', 'error'];
-const MAX_IMAGES = 10;
+const MAX_IMAGES = config.product.maxImages;
 
 // ── Embedded sub-schemas (no own _id / collection - they live inline) ──
 

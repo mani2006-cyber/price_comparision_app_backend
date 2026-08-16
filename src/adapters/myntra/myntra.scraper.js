@@ -12,10 +12,11 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const logger = require('../../utils/logger');
+const config = require('../../config/env');
 const { withDefaults, validateProviderProduct, validateProviderProductList } = require('../provider.interface');
 
 const BASE = 'https://www.myntra.com';
-const MAX_SEARCH_RESULTS = 8;
+const MAX_SEARCH_RESULTS = config.scraper.maxSearchResults;
 
 function getHeaders(referer) {
     return {
@@ -29,7 +30,7 @@ function getHeaders(referer) {
 async function fetchHtml(url, referer) {
     const response = await axios.get(url, {
         headers: getHeaders(referer),
-        timeout: 20000,
+        timeout: config.scraper.timeoutMs,
         decompress: true,
         maxRedirects: 5,
     });
@@ -290,7 +291,7 @@ function parseProductPageFromState(pdp, url) {
         externalId: pid,
         title,
         brand,
-        images: gallery.slice(0, 10),
+        images: gallery.slice(0, config.product.maxImages),
         currentPrice,
         originalPrice,
         currency: 'INR',
@@ -328,7 +329,7 @@ function parseProductPageFromCheerio(html, url) {
         externalId: pid,
         title,
         brand,
-        images: gallery.slice(0, 10),
+        images: gallery.slice(0, config.product.maxImages),
         currentPrice,
         originalPrice: toNum($('.pdp-mrp s, [class*="pdp-mrp"]').first().text()),
         currency: 'INR',

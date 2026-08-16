@@ -135,6 +135,26 @@ async function countByCategory(category) {
 
 // ── Writes ───────────────────────────────────────────────────────────
 
+// GET /api/categories caches its whole response under one fixed key (see
+// category.routes.js's keyBuilder, which returns the constant 'list'), so
+// unlike the per-query search caches this one CAN be invalidated precisely
+// - there's exactly one entry to drop.
+//
+// It has to be, too. The list is derived from whatever products happen to
+// be persisted, and every search persists more. Without this, a category
+// discovered by today's search stays invisible until the entry expires on
+// its own - which at CACHE_CATEGORY_TTL_SECONDS (3 days) means the browse
+// page can sit for days showing a strict subset of what's really in the
+// catalog, with no way for a user to tell.
+const CATEGORY_LIST_CACHE_KEY = 'categories:list';
+
+function invalidateCategoryListCache() {
+    // Fire-and-forget: cache.del already swallows its own errors and no-ops
+    // when Redis is off, and a failed invalidation must never fail the
+    // upsert that triggered it.
+    cache.del(CATEGORY_LIST_CACHE_KEY);
+}
+
 async function upsertFromProviderData(providerData, session) {
     const options = session ? { session } : {};
 
@@ -150,6 +170,11 @@ async function upsertFromProviderData(providerData, session) {
             [Object.assign({}, providerData, { lastCheckedAt: now, lastPriceChangedAt: now })],
             options
         );
+        // A brand-new product may be the first one in its category, which
+        // would make the cached list wrong by omission.
+        if (created[0].category) {
+            invalidateCategoryListCache();
+        }
         return { product: created[0], priceChanged: false, isNew: true };
     }
 
@@ -197,6 +222,13 @@ async function upsertFromProviderData(providerData, session) {
         // single product can appear in many different query/sort/platform
         // cache entries, and enumerating/purging all of them isn't practical.
         await cache.del('product:' + existing._id.toString());
+    }
+
+    // A category appearing, disappearing, or changing on an existing product
+    // can add or remove a whole row from the browse list - most often when a
+    // re-scrape fills in a category the adapter previously couldn't extract.
+    if (String(existing.category || '') !== String(updated.category || '')) {
+        invalidateCategoryListCache();
     }
 
     return { product: updated, priceChanged, isNew: false };

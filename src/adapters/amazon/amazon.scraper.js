@@ -11,15 +11,16 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const logger = require('../../utils/logger');
+const config = require('../../config/env');
 const { withDefaults, validateProviderProduct, validateProviderProductList } = require('../provider.interface');
 
 const BASE = 'https://www.amazon.in';
-const MAX_SEARCH_RESULTS = 8;
+const MAX_SEARCH_RESULTS = config.scraper.maxSearchResults;
 
 // ── Retry configuration ─────────────────────────────────────────────
-const MAX_RETRIES = 4; // total attempts = MAX_RETRIES + 1
-const BASE_DELAY_MS = 1000; // first retry waits ~1s
-const MAX_DELAY_MS = 15000; // cap backoff at 15s
+const MAX_RETRIES = config.amazonScraper.maxRetries; // total attempts = MAX_RETRIES + 1
+const BASE_DELAY_MS = config.amazonScraper.baseDelayMs; // first retry waits ~1s
+const MAX_DELAY_MS = config.amazonScraper.maxDelayMs; // cap backoff at 15s
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -31,8 +32,8 @@ function sleep(ms) {
 // consecutive full-retry failures, short-circuit for a cooldown window
 // so callers (e.g. the auto-mode orchestrator) can fail fast to another
 // provider instead of waiting ~13s per request for a doomed retry chain.
-const CIRCUIT_FAILURE_THRESHOLD = 3;
-const CIRCUIT_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+const CIRCUIT_FAILURE_THRESHOLD = config.amazonScraper.circuitFailureThreshold;
+const CIRCUIT_COOLDOWN_MS = config.amazonScraper.circuitCooldownMs; // 5 minutes by default
 
 let consecutiveFailures = 0;
 let circuitOpenUntil = 0;
@@ -95,7 +96,7 @@ async function fetchHtml(url, referer) {
         try {
             const response = await axios.get(url, {
                 headers: getHeaders(referer),
-                timeout: 20000,
+                timeout: config.scraper.timeoutMs,
                 decompress: true,
                 maxRedirects: 5,
                 // Let us inspect 503s ourselves instead of axios throwing immediately
@@ -317,7 +318,7 @@ function parseProductDetail(html, productUrl) {
         externalId: asin,
         title,
         brand,
-        images: images.slice(0, 10),
+        images: images.slice(0, config.product.maxImages),
         currentPrice,
         currency: 'INR',
         rating: {

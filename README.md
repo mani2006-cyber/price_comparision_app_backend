@@ -110,11 +110,19 @@ See `.env.example` for the full list with defaults. The ones worth knowing about
 | `REDIS_ENABLED` | `true`/`false`. Gates caching and cross-instance SSE push — see [Architecture](#architecture). Does NOT affect the price-refresher job (always `node-cron`, no Redis dependency). |
 | `CACHE_SEARCH_TTL_SECONDS` / `CACHE_PRODUCT_TTL_SECONDS` / `CACHE_COMPARE_TTL_SECONDS` / `CACHE_CATEGORY_TTL_SECONDS` / `CACHE_NOTIFICATIONS_TTL_SECONDS` | Per-route cache TTLs. |
 | `<MARKETPLACE>_PROVIDER_MODE` | `scraper` \| `api` \| `auto` — only meaningful for `amazon`/`flipkart`, the two marketplaces with a real official API as an alternative to scraping. |
-| `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX` | App-wide default rate limit (`apiLimiter`, applied globally in `app.js`) — default 20 requests/minute per IP. Route-specific limiters (`AUTH_RATE_LIMIT_*`, and `/compare-url`'s own 10/min) are stricter and stack on top of this, not instead of it. |
+| `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX` | App-wide default rate limit (`apiLimiter`, applied globally in `app.js`) — default 20 requests/minute per IP. Route-specific limiters (`AUTH_RATE_LIMIT_*`, `COMPARE_RATE_LIMIT_*`) are stricter and stack on top of this, not instead of it. |
+| `COMPARE_RATE_LIMIT_WINDOW_MS` / `COMPARE_RATE_LIMIT_MAX` | `/compare-url`'s own limiter (default 10/min — the most scraping-heavy endpoint). Used to be hardcoded directly in `product.routes.js`; now tunable without a code change. |
 | `PRICE_REFRESHER_CRON` | Cron pattern for the price-refresher job (`node-cron`), default every 6 hours. |
 | `CORS_ORIGINS` | Comma-separated allowlist. Any `http(s)://localhost:<port>` / `127.0.0.1:<port>` origin (and, outside production, any private-LAN IP — phone-on-wifi testing) is **always** allowed regardless of this list — see `app.js`. |
+| `SCRAPER_TIMEOUT_MS` / `SCRAPER_MAX_SEARCH_RESULTS` | Shared by every scraper-based adapter's own axios requests and result-count cap. Used to be 7 near-identical hardcoded constants (a mix of 15000/20000ms, all `= 8`) duplicated one per adapter file. |
+| `AMAZON_SCRAPER_MAX_RETRIES` / `_BASE_DELAY_MS` / `_MAX_DELAY_MS` / `_CIRCUIT_FAILURE_THRESHOLD` / `_CIRCUIT_COOLDOWN_MS` | `amazon.scraper.js`'s own retry/backoff/circuit-breaker tuning — the only adapter with this level of resilience logic. |
+| `API_MAX_SEARCH_RESULTS` / `RAPIDAPI_TIMEOUT_MS` | Official-API (`amazon.api.js`/`flipkart.api.js`) search cap and RapidAPI request timeout — kept separate from the scraper values above since a metered API call has a different cost profile than a scrape. |
+| `COMPARE_MIN_PRICE_RATIO` / `COMPARE_MAX_PRICE_RATIO` / `COMPARE_MIN_TITLE_SIMILARITY` | Cross-marketplace matching thresholds (`src/utils/similarity.js`) — see that file's own comments for the regression stories (Fujifilm camera, accessory price mismatch) behind each specific value. |
+| `PRODUCT_MAX_IMAGES` | Image-count cap, enforced identically in `Product.model.js`'s schema, `provider.interface.js`'s adapter-output validator, and every adapter's own truncation — all three read this same value so they can't silently drift out of sync. |
+| `CATEGORY_DEFAULT_LIMIT` / `CATEGORY_MAX_LIMIT` | Default and maximum page size for `GET /categories/:category/products`. |
+| `SSE_HEARTBEAT_MS` | How often the notification stream (`GET /notifications/stream`) writes a keepalive ping. |
 | `OPENROUTER_API_KEY` | Optional. Powers `result.aiSummary` on `POST /compare-url` — see that route's own notes above. Unset = feature silently disabled, nothing else affected. |
-| `OPENROUTER_MODEL` | Which OpenRouter model to use for the summary. Defaults to the free `nvidia/nemotron-3-ultra-550b-a55b:free`. |
+| `OPENROUTER_MODEL` / `OPENROUTER_MAX_TOKENS` / `OPENROUTER_TEMPERATURE` | Which model to use for the summary (defaults to the free `nvidia/nemotron-3-ultra-550b-a55b:free`), and its generation parameters. |
 
 ## API reference
 

@@ -50,6 +50,8 @@
 
 'use strict';
 
+const config = require('../config/env');
+
 const REQUIRED_FIELDS = ['marketplace', 'externalId', 'title', 'currentPrice', 'rawUrl', 'fetchedVia'];
 
 const VALID_MARKETPLACES = ['amazon', 'flipkart', 'myntra', 'ajio', 'lenskart', 'nykaa', 'poorvika', 'vijaysales'];
@@ -119,8 +121,8 @@ function validateProviderProduct(data) {
         throw new ProviderContractError('Adapter output "images" must be an array', data);
     }
 
-    if (data.images !== undefined && data.images.length > 10) {
-        throw new ProviderContractError('Adapter output "images" exceeds max of 10', data);
+    if (data.images !== undefined && data.images.length > config.product.maxImages) {
+        throw new ProviderContractError('Adapter output "images" exceeds max of ' + config.product.maxImages, data);
     }
 
     return data;

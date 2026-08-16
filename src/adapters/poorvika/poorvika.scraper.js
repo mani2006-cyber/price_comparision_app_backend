@@ -32,10 +32,11 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const logger = require('../../utils/logger');
+const config = require('../../config/env');
 const { withDefaults, validateProviderProduct, validateProviderProductList } = require('../provider.interface');
 
 const BASE = 'https://www.poorvika.com';
-const MAX_SEARCH_RESULTS = 8;
+const MAX_SEARCH_RESULTS = config.scraper.maxSearchResults;
 
 function getHeaders(referer) {
     return {
@@ -49,7 +50,7 @@ function getHeaders(referer) {
 async function fetchHtml(url, referer) {
     const response = await axios.get(url, {
         headers: getHeaders(referer),
-        timeout: 20000,
+        timeout: config.scraper.timeoutMs,
         decompress: true,
         maxRedirects: 5,
     });
@@ -350,7 +351,7 @@ function parseProductPage(html, url) {
         brand: cleanText(product.brand && product.brand.name),
         category: categoryFromBreadcrumb(breadcrumb),
         categoryPath: categoryPathFromBreadcrumb(breadcrumb),
-        images: imagesFromJsonLd(product.image).slice(0, 10),
+        images: imagesFromJsonLd(product.image).slice(0, config.product.maxImages),
         currentPrice: price,
         originalPrice: mrp,
         currency,

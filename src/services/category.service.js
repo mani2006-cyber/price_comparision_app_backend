@@ -12,9 +12,10 @@
 
 const ApiError = require('../utils/ApiError');
 const productRepository = require('../repositories/product.repository');
+const config = require('../config/env');
 
-const DEFAULT_PAGE = 1;
-const DEFAULT_LIMIT = 20;
+const DEFAULT_PAGE = 1; // pagination always starts at 1 - not a tunable, unlike the limit below
+const DEFAULT_LIMIT = config.category.defaultLimit;
 
 async function listCategories() {
     return productRepository.findDistinctCategories();

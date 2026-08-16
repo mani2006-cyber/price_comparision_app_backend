@@ -135,17 +135,84 @@ const config = {
         windowMs: getNumber('AUTH_RATE_LIMIT_WINDOW_MS', 15 * 60 * 1000),
         max: getNumber('AUTH_RATE_LIMIT_MAX', 10),
     },
+    // Was hardcoded directly in product.routes.js (windowMs: 60000, max: 10)
+    // rather than read from here like every other rate limiter - the one
+    // limiter you couldn't tune without a code change and a restart.
+    compareRateLimit: {
+        windowMs: getNumber('COMPARE_RATE_LIMIT_WINDOW_MS', 60000),
+        max: getNumber('COMPARE_RATE_LIMIT_MAX', 10),
+    },
 
     corsOrigins: getCsvList('CORS_ORIGINS', ['http://localhost:5173']),
 
     compare: {
         similarityThreshold: getNumber('SIMILARITY_THRESHOLD', 0.2),
         maxCrossMatches: getNumber('MAX_CROSS_MATCHES', 5),
+        // How far apart two prices can be and still plausibly be the same
+        // real product across marketplaces (src/utils/similarity.js's
+        // passesPriceGate) - were bare module-level consts there.
+        minPriceRatio: getNumber('COMPARE_MIN_PRICE_RATIO', 0.4),
+        maxPriceRatio: getNumber('COMPARE_MAX_PRICE_RATIO', 2.5),
+        // Below this, two titles share too little real vocabulary to be
+        // plausibly the same product (similarity.js's own comment has the
+        // full "Fujifilm camera" regression story behind this exact value).
+        minTitleSimilarity: getNumber('COMPARE_MIN_TITLE_SIMILARITY', 0.12),
     },
 
     priceRefresher: {
         cronSchedule: getString('PRICE_REFRESHER_CRON', '0 */6 * * *'),
         delayMs: getNumber('PRICE_REFRESHER_DELAY_MS', 2000),
+    },
+
+    // Shared by every scraper-based adapter (amazon/flipkart's fallback
+    // path, myntra/lenskart/nykaa/poorvika/vijaysales always) - each used
+    // to hardcode its own axios timeout (a mix of 15000/20000) and its own
+    // MAX_SEARCH_RESULTS = 8 independently - 7 near-identical constants
+    // duplicated instead of one shared, tunable value.
+    scraper: {
+        timeoutMs: getNumber('SCRAPER_TIMEOUT_MS', 20000),
+        maxSearchResults: getNumber('SCRAPER_MAX_SEARCH_RESULTS', 8),
+    },
+
+    // amazon.scraper.js's retry/backoff/circuit-breaker tuning - the most
+    // elaborate resilience logic of any adapter (the others just fail
+    // once and report the error), so it gets its own dedicated group
+    // rather than folding into the shared `scraper` one above.
+    amazonScraper: {
+        maxRetries: getNumber('AMAZON_SCRAPER_MAX_RETRIES', 4),
+        baseDelayMs: getNumber('AMAZON_SCRAPER_BASE_DELAY_MS', 1000),
+        maxDelayMs: getNumber('AMAZON_SCRAPER_MAX_DELAY_MS', 15000),
+        circuitFailureThreshold: getNumber('AMAZON_SCRAPER_CIRCUIT_FAILURE_THRESHOLD', 3),
+        circuitCooldownMs: getNumber('AMAZON_SCRAPER_CIRCUIT_COOLDOWN_MS', 5 * 60 * 1000),
+    },
+
+    // amazon.api.js/flipkart.api.js's official-API search result cap -
+    // deliberately separate from scraper.maxSearchResults above (20 vs 8)
+    // since a paid/metered API call has a different cost profile than a
+    // scrape, and the two have always been tuned independently.
+    apiSearch: {
+        maxResults: getNumber('API_MAX_SEARCH_RESULTS', 20),
+    },
+
+    rapidApi: {
+        timeoutMs: getNumber('RAPIDAPI_TIMEOUT_MS', 10000),
+    },
+
+    sse: {
+        heartbeatMs: getNumber('SSE_HEARTBEAT_MS', 25000),
+    },
+
+    product: {
+        // Product.model.js's own schema validator caps images at this -
+        // was a bare module-level const there.
+        maxImages: getNumber('PRODUCT_MAX_IMAGES', 10),
+    },
+
+    category: {
+        defaultLimit: getNumber('CATEGORY_DEFAULT_LIMIT', 20),
+        // The validator (categoryProductsQuerySchema) rejects a limit
+        // above this - was a bare literal (50) in product.validators.js.
+        maxLimit: getNumber('CATEGORY_MAX_LIMIT', 50),
     },
 
     // Per-provider mode ("scraper" | "api" | "auto"). Adapters read ONLY
@@ -181,6 +248,9 @@ const config = {
         apiKey: getString('OPENROUTER_API_KEY', null),
         model: getString('OPENROUTER_MODEL', 'nvidia/nemotron-3-ultra-550b-a55b:free'),
         timeoutMs: getNumber('OPENROUTER_TIMEOUT_MS', 20000),
+        // Were bare literals in aiComparison.service.js's own chat.send() call.
+        maxTokens: getNumber('OPENROUTER_MAX_TOKENS', 200),
+        temperature: getNumber('OPENROUTER_TEMPERATURE', 0.4),
     },
 };
 
