@@ -273,4 +273,34 @@ describe('searchByLink', function() {
         const result = await poorvika.searchByLink('https://www.poorvika.com/apple-iphone-16-black-128gb/p');
         expect(result).toBeNull();
     });
+
+    // Real bug found live: externalId here used to be product.sku (from
+    // this page's own JSON-LD), while parseSearchResults used the URL
+    // slug - two unrelated values for the same real product, which
+    // silently created a duplicate Product document every time a
+    // search-found product got refreshed via searchByLink. See
+    // extractSlugFromUrl's comment in the adapter for the full story.
+    it('derives externalId from the URL slug, matching what searchByQuery would compute for the same product', async function() {
+        axios.get.mockResolvedValue({ data: productPageHtml() });
+
+        const result = await poorvika.searchByLink('https://www.poorvika.com/apple-iphone-16-black-128gb/p');
+
+        expect(result.externalId).toBe('apple-iphone-16-black-128gb');
+    });
+
+    it('still captures product.sku, just as the separate sku field, not identity', async function() {
+        axios.get.mockResolvedValue({ data: productPageHtml() });
+
+        const result = await poorvika.searchByLink('https://www.poorvika.com/apple-iphone-16-black-128gb/p');
+
+        expect(result.sku).toBe('MYE73HN/A');
+        expect(result.externalId).not.toBe(result.sku);
+    });
+
+    it('returns null when the URL has no extractable slug', async function() {
+        axios.get.mockResolvedValue({ data: productPageHtml() });
+
+        const result = await poorvika.searchByLink('not a valid url');
+        expect(result).toBeNull();
+    });
 });

@@ -106,6 +106,33 @@ function extractRupeeAmount(text) {
     return toNum(text); // no rupee symbol present - fall back to the old behavior
 }
 
+// Real bug found live: parseSearchResults used the URL slug as
+// externalId (the only identity signal a search-results CARD carries -
+// the product's real `sku` isn't rendered there at all), while
+// parseProductPage used product.sku from the detail page's own JSON-LD -
+// two completely unrelated values for the exact same real product.
+// Product documents are deduplicated on (marketplace, externalId), so
+// every Poorvika product first found via search and later refreshed via
+// searchByLink (compare-url, or the price-refresher job) got a BRAND NEW
+// duplicate document instead of an in-place update - confirmed live (a
+// "Zebronics ZEB-NS1500 laptop stand" ended up as two documents, same
+// rawUrl, externalId "Zeb-NS1500" vs "zebronics-zeb-ns1500-laptop-stand-
+// black"). Both paths now derive externalId from the URL slug instead -
+// the one identity signal genuinely available (and equal) in both
+// places. product.sku is still captured, just as the separate `sku`
+// display field, not identity - see flipkart.scraper.js's
+// extractPidFromHtml/extractPidFromUrl comments for the sibling bug this
+// same pattern caused there.
+function extractSlugFromUrl(url) {
+    if (!url) return null;
+    try {
+        const pathname = new URL(url).pathname;
+        return pathname.replace(/^\/|\/p$/g, '') || null;
+    } catch (err) {
+        return null;
+    }
+}
+
 function buildKeywords(title) {
     if (!title) return [];
     return title
@@ -277,6 +304,12 @@ function parseProductPage(html, url) {
     const title = resolveTitle(product);
     if (!title) return null;
 
+    // Identity comes from the URL slug, matching parseSearchResults - see
+    // extractSlugFromUrl's own comment for why product.sku can't be used
+    // here despite being the more "official"-looking value.
+    const slug = extractSlugFromUrl(url);
+    if (!slug) return null;
+
     const currency = (
         (product.offers && product.offers.offers && product.offers.offers[0] && product.offers.offers[0].priceCurrency) ||
         (product.offers && product.offers.priceCurrency) ||
@@ -285,7 +318,8 @@ function parseProductPage(html, url) {
 
     return withDefaults({
         marketplace: 'poorvika',
-        externalId: String(product.sku),
+        externalId: slug,
+        sku: String(product.sku),
         title,
         brand: cleanText(product.brand && product.brand.name),
         category: categoryFromBreadcrumb(breadcrumb),
