@@ -225,16 +225,6 @@ function categoryFromUnbxdProduct(p) {
     return { category: path.length > 0 ? path[path.length - 1] : null, categoryPath: path };
 }
 
-// Same "it's already in the response" case as the category above: Unbxd
-// carries the brand, so reading it here costs no extra request. It arrives
-// as an ARRAY (["TP-Link"]) even for a single brand, unlike the product
-// page's JSON-LD which gives a plain string via product.brand.name - hence
-// normalising here rather than inside cleanText.
-function brandFromUnbxdProduct(p) {
-    const raw = Array.isArray(p.brand) ? p.brand[0] : p.brand;
-    return cleanText(raw) || null;
-}
-
 function parseUnbxdResults(json) {
     const products = (json && json.response && json.response.products) || [];
     const results = [];
@@ -249,7 +239,6 @@ function parseUnbxdResults(json) {
                 marketplace: 'vijaysales',
                 externalId: String(p.sku),
                 title: cleanText(p.title),
-                brand: brandFromUnbxdProduct(p),
                 category: category.category,
                 categoryPath: category.categoryPath,
                 images: p.thumbnailImage ? [p.thumbnailImage] : [],
