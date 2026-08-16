@@ -156,6 +156,68 @@ describe('searchByQuery', function() {
         expect(pathSegment).toContain('/laptop+stand/s');
         expect(pathSegment).not.toContain('%20');
     });
+
+    // Real gap found live: search results never carried a category at
+    // all - the search-results page's cards have no breadcrumb signal in
+    // their markup, only title/price/image. Getting one means fetching
+    // each result's own product page (same tradeoff Nykaa's searchByQuery
+    // already accepts, for its own reason) - see extractCategoryFromHtml's
+    // comment in the adapter for the full story. 0/111 Poorvika products
+    // in the DB had a category before this fix.
+    describe('category enrichment (fetches each result\'s own product page)', function() {
+        const CARD_HTML = `
+            <div class="outer-card">
+              <div class="product-cardlist_card__IeCc4">
+                <img src="https://img-prd-pim.poorvika.com/product/zeb-ns1500.png" />
+                <div class="product-cardlist_card__description__eduH5">
+                  <a target="_blank" href="/zebronics-zeb-ns1500-laptop-stand-black/p">
+                    <b>Zebronics ZEB-NS1500 Laptop Stand ( Black )</b>
+                    <div class="product-cardlist_price__1aKwZ"><span>₹ 799</span></div>
+                  </a>
+                </div>
+              </div>
+            </div>
+        `;
+
+        function breadcrumbPageHtml() {
+            const breadcrumb = {
+                '@type': 'BreadcrumbList',
+                itemListElement: [
+                    { item: { name: 'Home' } },
+                    { item: { name: 'Accessories' } },
+                    { item: { name: 'Laptop Accessories' } },
+                    { item: { name: 'Laptop Stand' } },
+                ],
+            };
+            return '<html><head>' + jsonLdScript(breadcrumb) + '</head><body></body></html>';
+        }
+
+        it('enriches a search result with category/categoryPath from its own product page', async function() {
+            axios.get
+                .mockResolvedValueOnce({ data: CARD_HTML }) // the search-results page itself
+                .mockResolvedValueOnce({ data: breadcrumbPageHtml() }); // that one card's own product page
+
+            const results = await poorvika.searchByQuery('laptop stand');
+
+            expect(results).toHaveLength(1);
+            expect(results[0].category).toBe('Laptop Stand');
+            expect(results[0].categoryPath).toEqual(['Accessories', 'Laptop Accessories', 'Laptop Stand']);
+            // The cheap card data (from the FIRST, already-cheap request) is untouched.
+            expect(results[0].currentPrice).toBe(799);
+        });
+
+        it('still returns the result with category null (not dropped) when its own product-page fetch fails', async function() {
+            axios.get
+                .mockResolvedValueOnce({ data: CARD_HTML })
+                .mockRejectedValueOnce(new Error('timeout'));
+
+            const results = await poorvika.searchByQuery('laptop stand');
+
+            expect(results).toHaveLength(1);
+            expect(results[0].category).toBeNull();
+            expect(results[0].currentPrice).toBe(799); // the rest of the result is unaffected
+        });
+    });
 });
 
 describe('searchByLink', function() {

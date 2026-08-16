@@ -172,12 +172,20 @@ function findJsonLdByType(values, type) {
 // Root-first, excluding only the site root ("Home") - the leaf on this
 // site IS a real category (unlike Vijay Sales, whose leaf is the
 // product's own name), so it is kept.
-function categoryFromBreadcrumb(breadcrumb) {
+function categoryPathFromBreadcrumb(breadcrumb) {
     const items = (breadcrumb && breadcrumb.itemListElement) || [];
-    if (items.length <= 1) return null;
-    const leaf = items[items.length - 1];
-    const name = (leaf && leaf.item && leaf.item.name) || (leaf && leaf.name);
-    return cleanText(name);
+    if (items.length <= 1) return [];
+    return items
+        .slice(1) // drop the site root ("Home")
+        .map(function(item) {
+            return cleanText((item && item.item && item.item.name) || (item && item.name));
+        })
+        .filter(Boolean);
+}
+
+function categoryFromBreadcrumb(breadcrumb) {
+    const path = categoryPathFromBreadcrumb(breadcrumb);
+    return path.length > 0 ? path[path.length - 1] : null;
 }
 
 function imagesFromJsonLd(image) {
@@ -291,6 +299,24 @@ function parseSearchResults(html) {
 
 // ── Product page parsing ─────────────────────────────────────────────
 
+// Real gap found live: search results never carried a category, because
+// the search-results page's cards carry no breadcrumb/category signal
+// AT ALL in their markup (only title/price/image) - unlike Vijay Sales,
+// where the data was already sitting in the search response being
+// parsed, there is genuinely no free source here. category IS available
+// on each product's own detail page (categoryFromBreadcrumb, already
+// used by parseProductPage below) - so getting it for search results
+// means fetching each result's own product page, same tradeoff Nykaa's
+// searchByQuery already accepts for its own reason (that site's search
+// endpoint carries no price at all). Isolated into its own lightweight
+// function (not a full parseProductPage call) since search enrichment
+// only needs the category, not re-validating price/sku/title too.
+function extractCategoryFromHtml(html) {
+    const jsonLdValues = extractJsonLdValues(html);
+    const breadcrumb = findJsonLdByType(jsonLdValues, 'BreadcrumbList');
+    return { category: categoryFromBreadcrumb(breadcrumb), categoryPath: categoryPathFromBreadcrumb(breadcrumb) };
+}
+
 function parseProductPage(html, url) {
     const jsonLdValues = extractJsonLdValues(html);
     const product = findJsonLdByType(jsonLdValues, 'Product');
@@ -323,6 +349,7 @@ function parseProductPage(html, url) {
         title,
         brand: cleanText(product.brand && product.brand.name),
         category: categoryFromBreadcrumb(breadcrumb),
+        categoryPath: categoryPathFromBreadcrumb(breadcrumb),
         images: imagesFromJsonLd(product.image).slice(0, 10),
         currentPrice: price,
         originalPrice: mrp,
@@ -342,6 +369,30 @@ function parseProductPage(html, url) {
 
 // ── Public contract ─────────────────────────────────────────────────
 
+// Enriches each search result with a category by fetching its own
+// product page - see extractCategoryFromHtml's comment for why this is
+// necessary (the search page's cards carry no category signal at all).
+// Best-effort and parallel (Promise.allSettled): one result's page
+// failing to fetch/parse must not fail the whole search, and just
+// leaves that one result's category null rather than dropping it
+// entirely - a missing category is a lesser degradation than a missing
+// product.
+async function enrichWithCategories(results) {
+    const settled = await Promise.allSettled(
+        results.map(function(product) {
+            return fetchHtml(product.rawUrl, BASE + '/').then(function(detailHtml) {
+                return extractCategoryFromHtml(detailHtml);
+            });
+        })
+    );
+
+    return results.map(function(product, i) {
+        const outcome = settled[i];
+        if (outcome.status !== 'fulfilled') return product;
+        return Object.assign({}, product, outcome.value);
+    });
+}
+
 async function searchByQuery(query) {
     const pathSegment = encodeURIComponent(query).replace(/%20/g, '+');
     const url = BASE + '/' + pathSegment + '/s?q=' + encodeURIComponent(query);
@@ -354,7 +405,8 @@ async function searchByQuery(query) {
         throw err;
     }
 
-    const results = parseSearchResults(html);
+    const cardResults = parseSearchResults(html);
+    const results = await enrichWithCategories(cardResults);
     logger.info('Poorvika scraper search finished', { query, count: results.length });
 
     return validateProviderProductList(results);
