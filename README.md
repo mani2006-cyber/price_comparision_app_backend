@@ -173,7 +173,14 @@ Rate-limited (`AUTH_RATE_LIMIT_*`), stricter than the app-wide default. `signup`
 
 - This browses the **already-persisted catalog** — products a prior `/search` or `/compare-url` call already found and saved — it never triggers a live marketplace fetch the way `/search` does. A category with nothing saved for it yet returns an empty list, not an error.
 - `category` matching is **case-insensitive** (MongoDB collation, not a regex) — `/categories/headphones/products` and `/categories/Headphones/products` are the same request.
-- Coverage is partial by nature: only `myntra`/`nykaa`/`poorvika`/`vijaysales` currently extract a category from their source pages (via breadcrumb parsing); `amazon`/`flipkart`/`lenskart` leave it unset. That's an honest reflection of what those adapters' source pages actually expose, not a bug.
+- Coverage by marketplace (each is a deliberate tradeoff, not an oversight):
+  - `myntra` — embedded directly in the search-results response, no extra cost.
+  - `nykaa` — its search path already fetches each result's own product page for an unrelated reason (that site's search endpoint carries no price at all), so category comes along for free.
+  - `lenskart` — always set (defaults to `"Eyewear"` if the source page's own classification is missing).
+  - `vijaysales` — free: the underlying Unbxd search API already returns a full category breadcrumb (`l1`..`l4`) per result that the adapter just wasn't reading before.
+  - `poorvika` — **not** free: search-result cards carry no category signal at all, so this adapter fetches each result's own product page in parallel (best-effort — one result's page failing to load just leaves that result's category `null`, the way Nykaa's own equivalent fetch already behaves).
+  - `amazon` — deliberately left unset. Category only exists via a separate, metered RapidAPI endpoint (`/product-details`, not `/search`); fetching it per search result would burn through the same RapidAPI quota `/search` and `/compare-url` both depend on (confirmed live: a `429` from that exact subscription while investigating this).
+  - `flipkart` — deliberately left unset. Investigated a per-product category signal embedded in the search page's own React payload; it's inconsistent across identical requests (found it once, then missed it on all 40 further attempts) and the product-detail page's version is a React Server Components stream that would need resolving indirect content references — too fragile to ship.
 - `limit` is capped at 50; default `page=1`, `limit=20`.
 
 ### Wishlist — `/api/wishlist` 🔒 (every route)

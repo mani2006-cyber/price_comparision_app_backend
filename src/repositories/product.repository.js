@@ -74,11 +74,14 @@ async function searchByText(query, limit) {
 // compare-url already found and saved), never triggers a live
 // marketplace fetch the way /search does - a category listing is
 // "what do we already know about", not "go find more right now".
-// Coverage is necessarily partial: only nykaa/poorvika/vijaysales/myntra
-// currently extract a category from their source pages at all (see each
-// adapter's own breadcrumb-parsing code) - amazon/flipkart/lenskart
-// leave it null. That's an honest reflection of what the adapters
-// actually give us, not a bug to route around here.
+// Coverage is necessarily partial: myntra/nykaa/lenskart/vijaysales/
+// poorvika all set one (see each adapter's own comment for how/why);
+// amazon and flipkart deliberately don't - amazon's only exists via a
+// separate metered RapidAPI endpoint (real quota cost to fetch per
+// search result), and flipkart's is embedded in a fragile, inconsistent
+// spot that isn't worth shipping. That's a deliberate tradeoff per
+// marketplace, not a bug to route around here - see README.md's
+// Categories section for the full breakdown.
 
 const CATEGORY_COLLATION = { locale: 'en', strength: 2 }; // case-insensitive exact match
 
