@@ -130,6 +130,77 @@ describe('runSearch applies sorting to the persisted products', function() {
     });
 });
 
+describe('runSearch - pagination', function() {
+    function fakeProducts(count) {
+        const products = [];
+        for (let i = 0; i < count; i++) products.push({ currentPrice: i });
+        return products;
+    }
+
+    it('defaults to page 1 with config.search.defaultLimit results', async function() {
+        productService.searchAndPersist.mockResolvedValue({ products: fakeProducts(30), marketplaceFailures: [] });
+
+        const result = await searchService.runSearch('laptop', null);
+
+        expect(result.page).toBe(1);
+        expect(result.limit).toBe(config.search.defaultLimit);
+        expect(result.products).toHaveLength(config.search.defaultLimit);
+        expect(result.total).toBe(30);
+        expect(result.totalPages).toBe(Math.ceil(30 / config.search.defaultLimit));
+    });
+
+    it('returns the requested page, a disjoint slice from page 1', async function() {
+        productService.searchAndPersist.mockResolvedValue({ products: fakeProducts(25), marketplaceFailures: [] });
+
+        const page1 = await searchService.runSearch('laptop', null, { page: 1, limit: 10 });
+        const page2 = await searchService.runSearch('laptop', null, { page: 2, limit: 10 });
+        const page3 = await searchService.runSearch('laptop', null, { page: 3, limit: 10 });
+
+        expect(page1.products).toHaveLength(10);
+        expect(page2.products).toHaveLength(10);
+        expect(page3.products).toHaveLength(5); // remainder
+        expect(page1.products[0].currentPrice).not.toBe(page2.products[0].currentPrice);
+        expect(page1.totalPages).toBe(3);
+    });
+
+    it('total/resultCount reflects EVERY result, not just the current page', async function() {
+        productService.searchAndPersist.mockResolvedValue({ products: fakeProducts(47), marketplaceFailures: [] });
+
+        const result = await searchService.runSearch('laptop', null, { page: 2, limit: 10 });
+
+        expect(result.products).toHaveLength(10);
+        expect(result.total).toBe(47);
+    });
+
+    it('records search history against the TOTAL count, not the page size', async function() {
+        productService.searchAndPersist.mockResolvedValue({ products: fakeProducts(47), marketplaceFailures: [] });
+
+        await searchService.runSearch('laptop', user._id, { page: 1, limit: 10 });
+
+        const history = await searchService.getSearchHistory(user._id);
+        expect(history[0].resultCount).toBe(47); // not 10
+    });
+
+    it('an out-of-range page returns an empty products array, not an error', async function() {
+        productService.searchAndPersist.mockResolvedValue({ products: fakeProducts(5), marketplaceFailures: [] });
+
+        const result = await searchService.runSearch('laptop', null, { page: 99, limit: 10 });
+
+        expect(result.products).toEqual([]);
+        expect(result.total).toBe(5);
+    });
+
+    it('pagination is applied AFTER sorting, so page 2 continues in sorted order', async function() {
+        const products = [];
+        for (let i = 20; i >= 1; i--) products.push({ currentPrice: i }); // descending input order
+        productService.searchAndPersist.mockResolvedValue({ products, marketplaceFailures: [] });
+
+        const page2 = await searchService.runSearch('laptop', null, { sortBy: 'price_asc', page: 2, limit: 10 });
+
+        expect(page2.products.map(function(p) { return p.currentPrice; })).toEqual([11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+    });
+});
+
 describe('deleteSearchHistoryItem', function() {
     it('deletes an entry belonging to the caller', async function() {
         productService.searchAndPersist.mockResolvedValue({ products: [{ currentPrice: 100 }], marketplaceFailures: [] });

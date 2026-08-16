@@ -43,6 +43,30 @@ describe('searchQuerySchema', function() {
         const result = searchQuerySchema.parse({ q: 'x', unexpectedField: 'zzz' });
         expect(result).not.toHaveProperty('unexpectedField');
     });
+
+    it('coerces page/limit from query-string values to numbers', function() {
+        const result = searchQuerySchema.parse({ q: 'x', page: '2', limit: '10' });
+        expect(result.page).toBe(2);
+        expect(result.limit).toBe(10);
+    });
+
+    it('leaves page/limit undefined when omitted (both optional)', function() {
+        const result = searchQuerySchema.parse({ q: 'x' });
+        expect(result.page).toBeUndefined();
+        expect(result.limit).toBeUndefined();
+    });
+
+    it('rejects page below 1', function() {
+        expect(function() { searchQuerySchema.parse({ q: 'x', page: '0' }); }).toThrow();
+    });
+
+    it('rejects a non-integer page', function() {
+        expect(function() { searchQuerySchema.parse({ q: 'x', page: '1.5' }); }).toThrow();
+    });
+
+    it('rejects a limit above the configured cap', function() {
+        expect(function() { searchQuerySchema.parse({ q: 'x', limit: '999' }); }).toThrow();
+    });
 });
 
 describe('compareUrlBodySchema', function() {

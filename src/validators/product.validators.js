@@ -19,6 +19,11 @@ const SORT_BY_VALUES = ['price_asc', 'price_desc', 'rating'];
 // fails this), matching product.controller.js's own pre-existing
 // wording so the response text callers/tests already depend on
 // ("A search query 'q' is required") doesn't change.
+// page/limit arrive as query strings, hence z.coerce.number() (same
+// reasoning as alert.validators.js's targetPrice) rather than z.number().
+// limit is capped (config.search.maxLimit) so a client can't force an
+// unbounded page size through - the underlying multi-marketplace fetch
+// this paginates over is already bounded, but the RESPONSE size wasn't.
 const searchQuerySchema = z.object({
     q: z.string("A search query 'q' is required").trim().min(1, "A search query 'q' is required"),
     sortBy: z.enum(SORT_BY_VALUES).optional(),
@@ -29,6 +34,8 @@ const searchQuerySchema = z.object({
     // without a matching code change in two places. A non-empty string
     // is enough to catch the obvious mistakes (e.g. "?platform=").
     platform: z.string().trim().min(1).optional(),
+    page: z.coerce.number("'page' must be a number").int().min(1).optional(),
+    limit: z.coerce.number("'limit' must be a number").int().min(1).max(config.search.maxLimit).optional(),
 });
 
 // POST /api/compare-url - a real URL, not just "any non-empty string"

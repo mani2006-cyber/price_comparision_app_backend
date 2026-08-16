@@ -215,6 +215,18 @@ const config = {
         maxLimit: getNumber('CATEGORY_MAX_LIMIT', 50),
     },
 
+    // GET /search used to return every result from every active
+    // marketplace in one unpaginated response (up to
+    // scraper.maxSearchResults x however many marketplaces are active -
+    // 50+ results in one payload). The underlying multi-marketplace
+    // fetch+cache is still unpaginated (search.service.js's runSearch
+    // slices the ALREADY-fetched, already-cached merged result set, not
+    // a separate fetch per page) - only the HTTP response is paginated.
+    search: {
+        defaultLimit: getNumber('SEARCH_DEFAULT_LIMIT', 20),
+        maxLimit: getNumber('SEARCH_MAX_LIMIT', 50),
+    },
+
     // Per-provider mode ("scraper" | "api" | "auto"). Adapters read ONLY
     // their own entry here.
     providerModes: {

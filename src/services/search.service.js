@@ -10,6 +10,9 @@
 const productService = require('./product.service');
 const searchHistoryRepository = require('../repositories/searchHistory.repository');
 const logger = require('../utils/logger');
+const config = require('../config/env');
+
+const DEFAULT_PAGE = 1; // pagination always starts at 1 - not a tunable, unlike the limit below
 
 // ── Sorting ──────────────────────────────────────────────────────────
 // Deliberately a small, separate, pure function - NOT inlined into
@@ -38,11 +41,22 @@ function getSortedProducts(products, sortBy) {
 }
 
 // ── Run a search, optionally record history ─────────────────────────
+//
+// Pagination happens HERE, over the already-fetched, already-cached
+// merged result set from every active marketplace - NOT as a separate
+// fetch per page. productService.searchAndPersist's own cache key is
+// query text alone (no page/limit in it), so requesting page 2 of an
+// already-searched query is a cache HIT, same expensive multi-marketplace
+// fetch shared across every page - see product.service.js's own header
+// comment on searchAndPersist for why that cache exists at all.
 async function runSearch(query, userId, options) {
     const searchResult = await productService.searchAndPersist(query, options);
 
     const sorted = getSortedProducts(searchResult.products, options && options.sortBy);
 
+    // Recorded against the TOTAL count across every page, not just
+    // whichever page was requested - "how many results did this search
+    // find" shouldn't depend on which page the caller happened to ask for.
     if (userId) {
         try {
             await searchHistoryRepository.recordSearch(
@@ -58,8 +72,17 @@ async function runSearch(query, userId, options) {
         }
     }
 
+    const page = (options && options.page) || DEFAULT_PAGE;
+    const limit = (options && options.limit) || config.search.defaultLimit;
+    const start = (page - 1) * limit;
+    const paginated = sorted.slice(start, start + limit);
+
     return {
-        products: sorted,
+        products: paginated,
+        total: sorted.length,
+        page,
+        limit,
+        totalPages: Math.ceil(sorted.length / limit) || 0,
         marketplaceFailures: searchResult.marketplaceFailures,
     };
 }

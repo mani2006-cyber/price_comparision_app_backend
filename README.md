@@ -120,6 +120,7 @@ See `.env.example` for the full list with defaults. The ones worth knowing about
 | `COMPARE_MIN_PRICE_RATIO` / `COMPARE_MAX_PRICE_RATIO` / `COMPARE_MIN_TITLE_SIMILARITY` | Cross-marketplace matching thresholds (`src/utils/similarity.js`) — see that file's own comments for the regression stories (Fujifilm camera, accessory price mismatch) behind each specific value. |
 | `PRODUCT_MAX_IMAGES` | Image-count cap, enforced identically in `Product.model.js`'s schema, `provider.interface.js`'s adapter-output validator, and every adapter's own truncation — all three read this same value so they can't silently drift out of sync. |
 | `CATEGORY_DEFAULT_LIMIT` / `CATEGORY_MAX_LIMIT` | Default and maximum page size for `GET /categories/:category/products`. |
+| `SEARCH_DEFAULT_LIMIT` / `SEARCH_MAX_LIMIT` | Default and maximum page size for `GET /search` — paginates the already-fetched, already-cached merged result set (see that route's own notes above), not a separate fetch per page. |
 | `SSE_HEARTBEAT_MS` | How often the notification stream (`GET /notifications/stream`) writes a keepalive ping. |
 | `OPENROUTER_API_KEY` | Optional. Powers `result.aiSummary` on `POST /compare-url` — see that route's own notes above. Unset = feature silently disabled, nothing else affected. |
 | `OPENROUTER_MODEL` / `OPENROUTER_MAX_TOKENS` / `OPENROUTER_TEMPERATURE` | Which model to use for the summary (defaults to the free `nvidia/nemotron-3-ultra-550b-a55b:free`), and its generation parameters. |
@@ -160,7 +161,7 @@ Rate-limited (`AUTH_RATE_LIMIT_*`), stricter than the app-wide default. `signup`
 
 | Method | Path | Auth | Query / Body | Response |
 |---|---|---|---|---|
-| GET | `/search` | optional 🔒 | `?q=<required>&sortBy=price_asc\|price_desc\|rating&platform=<marketplace>` | `200` `{ success, query, resultCount, products, marketplaceFailures }` |
+| GET | `/search` | optional 🔒 | `?q=<required>&sortBy=price_asc\|price_desc\|rating&platform=<marketplace>&page=&limit=` | `200` `{ success, query, resultCount, products, page, limit, totalPages, marketplaceFailures }` |
 | GET | `/search/history` | 🔒 | `?limit=` | `200` `{ success, history }` |
 | DELETE | `/search/history/:id` | 🔒 | — | `200` `{ success, message }` or `404` |
 | GET | `/products/:id` | — | — | `200` `{ success, product }` or `404` |
@@ -169,7 +170,8 @@ Rate-limited (`AUTH_RATE_LIMIT_*`), stricter than the app-wide default. `signup`
 - `GET /search` runs across **every active marketplace in parallel**; one marketplace failing doesn't drop the others' results — it's reported in `marketplaceFailures` instead (`[{ marketplace, message }]`).
 - If `Authorization` is present, the search is **always** recorded to that user's search history — a repeat identical search still records a hit (bumping `searchCount` on the same history row) even when the underlying data came from cache; see [Caching](#caching) for why this is no longer a tradeoff the way it used to be.
 - `platform` is accepted and recorded to search history, but does **not** currently filter results — every marketplace is always searched.
-- `POST /compare-url` is rate-limited to 10 requests/minute (scraping-heavy). `url` must be a well-formed URL from a supported marketplace, or this returns `400` naming the marketplaces it does recognize.
+- `page`/`limit` paginate the response (default `page=1`, `limit=20`, capped at `limit=50`) — but **not** the underlying fetch: every active marketplace is always searched and the full merged result set is cached under the query text alone (see [Caching](#caching)), so requesting page 2 of an already-searched query is a cache hit, same shared fetch as page 1. `resultCount` is always the **total** across every page (also what gets recorded to search history), never just the current page's size.
+- `POST /compare-url` is rate-limited (`COMPARE_RATE_LIMIT_*`, default 10 requests/minute — scraping-heavy). `url` must be a well-formed URL from a supported marketplace, or this returns `400` naming the marketplaces it does recognize.
 - `result.aiSummary` is a short, AI-generated, plain-English take on which listing is the better deal (via OpenRouter, `src/services/aiComparison.service.js`) — **optional**: it's `null` whenever `OPENROUTER_API_KEY` isn't set, there are no genuine cross-marketplace matches, or the call fails/times out/hits the free model's rate limit. It never blocks or fails the rest of the response — the algorithmic `results[]`/`similarityScore` ranking (which decides *which* products are matches in the first place) doesn't depend on it at all.
 
 ### Categories — `/api/categories`
