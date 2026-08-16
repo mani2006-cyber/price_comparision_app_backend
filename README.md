@@ -109,6 +109,7 @@ See `.env.example` for the full list with defaults. The ones worth knowing about
 | `REDIS_ENABLED` | `true`/`false`. Gates caching and cross-instance SSE push — see [Architecture](#architecture). Does NOT affect the price-refresher job (always `node-cron`, no Redis dependency). |
 | `CACHE_SEARCH_TTL_SECONDS` / `CACHE_PRODUCT_TTL_SECONDS` / `CACHE_COMPARE_TTL_SECONDS` / `CACHE_NOTIFICATIONS_TTL_SECONDS` | Per-route cache TTLs. |
 | `<MARKETPLACE>_PROVIDER_MODE` | `scraper` \| `api` \| `auto` — only meaningful for `amazon`/`flipkart`, the two marketplaces with a real official API as an alternative to scraping. |
+| `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX` | App-wide default rate limit (`apiLimiter`, applied globally in `app.js`) — default 20 requests/minute per IP. Route-specific limiters (`AUTH_RATE_LIMIT_*`, and `/compare-url`'s own 10/min) are stricter and stack on top of this, not instead of it. |
 | `PRICE_REFRESHER_CRON` | Cron pattern for the price-refresher job (`node-cron`), default every 6 hours. |
 | `CORS_ORIGINS` | Comma-separated allowlist. Any `http(s)://localhost:<port>` / `127.0.0.1:<port>` origin (and, outside production, any private-LAN IP — phone-on-wifi testing) is **always** allowed regardless of this list — see `app.js`. |
 | `OPENROUTER_API_KEY` | Optional. Powers `result.aiSummary` on `POST /compare-url` — see that route's own notes above. Unset = feature silently disabled, nothing else affected. |

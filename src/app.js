@@ -83,8 +83,15 @@ app.use(cookieParser());
 
 // ── Rate limiting (global default - see rateLimiter.middleware.js for
 // route-specific stricter limits already applied inside auth.routes.js
-// and product.routes.js) ────────────────────────────────────────────
-//app.use(apiLimiter);
+// and product.routes.js, which stack on top of this one). This used to
+// be commented out - meaning NOTHING stopped a client from hammering
+// /search or /compare-url repeatedly, burning RapidAPI/OpenRouter quota
+// and risking exactly the "getting blocked by every marketplace" problem
+// the price-refresher job was already fixed for once before. Safe to
+// enable: .env.test's RATE_LIMIT_MAX is already set generously high
+// (1000/window) specifically so the test suite's own request volume
+// never trips this. ───────────────────────────────────────────────────
+app.use(apiLimiter);
 
 // ── Health check - deliberately trivial, no DB/service calls, so a
 // deployment platform or uptime monitor has something to ping that
