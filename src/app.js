@@ -17,6 +17,7 @@ const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 
 const authRoutes = require('./routes/auth.routes');
 const productRoutes = require('./routes/product.routes');
+const categoryRoutes = require('./routes/category.routes');
 const wishlistRoutes = require('./routes/wishlist.routes');
 const alertRoutes = require('./routes/alert.routes');
 const notificationRoutes = require('./routes/notification.routes');
@@ -103,6 +104,7 @@ app.get('/health', function(req, res) {
 // ── Routes ───────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
 app.use('/api', productRoutes); // defines /search, /search/history, /products/:id, /compare-url internally
+app.use('/api/categories', categoryRoutes);
 app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/notifications', notificationRoutes);

@@ -68,6 +68,55 @@ async function searchByText(query, limit) {
         .limit(limit || 20);
 }
 
+// ── Category browsing ───────────────────────────────────────────────
+//
+// Browses the ALREADY-PERSISTED catalog (products a prior search or
+// compare-url already found and saved), never triggers a live
+// marketplace fetch the way /search does - a category listing is
+// "what do we already know about", not "go find more right now".
+// Coverage is necessarily partial: only nykaa/poorvika/vijaysales/myntra
+// currently extract a category from their source pages at all (see each
+// adapter's own breadcrumb-parsing code) - amazon/flipkart/lenskart
+// leave it null. That's an honest reflection of what the adapters
+// actually give us, not a bug to route around here.
+
+const CATEGORY_COLLATION = { locale: 'en', strength: 2 }; // case-insensitive exact match
+
+function categorySortStage(sortBy) {
+    if (sortBy === 'price_asc') return { currentPrice: 1 };
+    if (sortBy === 'price_desc') return { currentPrice: -1 };
+    if (sortBy === 'rating') return { 'rating.average': -1 };
+    return { lastCheckedAt: -1 }; // default: most recently seen first
+}
+
+// Distinct category names currently present on at least one product,
+// with a count of how many - the natural data source for a "browse by
+// category" landing page. Alphabetical, not by count, so the list
+// doesn't reshuffle every time the catalog changes.
+async function findDistinctCategories() {
+    return Product.aggregate([
+        { $match: { category: { $ne: null } } },
+        { $group: { _id: '$category', count: { $sum: 1 } } },
+        { $sort: { _id: 1 } },
+        { $project: { _id: 0, category: '$_id', count: 1 } },
+    ]);
+}
+
+async function findByCategory(category, options) {
+    const page = (options && options.page) || 1;
+    const limit = (options && options.limit) || 20;
+
+    return Product.find({ category })
+        .collation(CATEGORY_COLLATION)
+        .sort(categorySortStage(options && options.sortBy))
+        .skip((page - 1) * limit)
+        .limit(limit);
+}
+
+async function countByCategory(category) {
+    return Product.countDocuments({ category }).collation(CATEGORY_COLLATION);
+}
+
 // ── Writes ───────────────────────────────────────────────────────────
 
 async function upsertFromProviderData(providerData, session) {
@@ -144,5 +193,8 @@ module.exports = {
     findStale,
     findStaleWithActiveAlerts,
     searchByText,
+    findDistinctCategories,
+    findByCategory,
+    countByCategory,
     upsertFromProviderData,
 };

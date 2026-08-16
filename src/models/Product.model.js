@@ -267,6 +267,14 @@ productSchema.index({ marketplace: 1, externalId: 1 }, { unique: true });
 // Supports "find products not checked recently" queries for the refresher.
 productSchema.index({ lastCheckedAt: 1 });
 
+// Supports category-browsing (GET /api/categories/:category/products).
+// Sparse - most documents have category: null (not every adapter
+// extracts one; see product.repository.js's findDistinctCategories
+// comment), and a sparse index skips those entirely rather than
+// wasting space indexing a field three-quarters of the collection
+// doesn't have.
+productSchema.index({ category: 1 }, { sparse: true });
+
 // Text search fallback across title, brand, and persisted keywords.
 productSchema.index({ title: 'text', brand: 'text', keywords: 'text' });
 

@@ -119,6 +119,7 @@ const config = {
         search: getNumber('CACHE_SEARCH_TTL_SECONDS', 300),
         product: getNumber('CACHE_PRODUCT_TTL_SECONDS', 300),
         compare: getNumber('CACHE_COMPARE_TTL_SECONDS', 600),
+        category: getNumber('CACHE_CATEGORY_TTL_SECONDS', 600),
         // Short by design - notifications are also actively invalidated on
         // every write (see notification.repository.js), so this TTL is
         // only a safety net for a missed invalidation, not the primary

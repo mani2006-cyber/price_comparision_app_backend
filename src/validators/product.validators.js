@@ -41,8 +41,19 @@ const compareUrlBodySchema = z.object({
         .url("A valid product 'url' is required"),
 });
 
+// GET /api/categories/:category/products - page/limit arrive as query
+// strings, hence z.coerce.number() (same reasoning as alert.validators.js's
+// targetPrice) rather than z.number(). limit is capped at 50 so a client
+// can't force an unbounded page size through the cache layer.
+const categoryProductsQuerySchema = z.object({
+    sortBy: z.enum(SORT_BY_VALUES).optional(),
+    page: z.coerce.number("'page' must be a number").int().min(1).optional(),
+    limit: z.coerce.number("'limit' must be a number").int().min(1).max(50).optional(),
+});
+
 module.exports = {
     SORT_BY_VALUES,
     searchQuerySchema,
     compareUrlBodySchema,
+    categoryProductsQuerySchema,
 };

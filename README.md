@@ -13,6 +13,7 @@ A backend for a price-comparison platform: search products across multiple marke
   - [Health](#health)
   - [Auth](#auth--apiauth)
   - [Search & products](#search--products--api)
+  - [Categories](#categories--apicategories)
   - [Wishlist](#wishlist--apiwishlist)
   - [Alerts](#alerts--apialerts)
   - [Notifications](#notifications--apinotifications)
@@ -107,7 +108,7 @@ See `.env.example` for the full list with defaults. The ones worth knowing about
 | `MONGO_URI` | Required. Must contain `test` for `.env.test` (`globalSetup.js` refuses to run otherwise, as a hard safety check against wiping a real database). |
 | `ACCESS_TOKEN_SECRET` / `REFRESH_TOKEN_SECRET` | Must be two **different** secrets — validated at startup. |
 | `REDIS_ENABLED` | `true`/`false`. Gates caching and cross-instance SSE push — see [Architecture](#architecture). Does NOT affect the price-refresher job (always `node-cron`, no Redis dependency). |
-| `CACHE_SEARCH_TTL_SECONDS` / `CACHE_PRODUCT_TTL_SECONDS` / `CACHE_COMPARE_TTL_SECONDS` / `CACHE_NOTIFICATIONS_TTL_SECONDS` | Per-route cache TTLs. |
+| `CACHE_SEARCH_TTL_SECONDS` / `CACHE_PRODUCT_TTL_SECONDS` / `CACHE_COMPARE_TTL_SECONDS` / `CACHE_CATEGORY_TTL_SECONDS` / `CACHE_NOTIFICATIONS_TTL_SECONDS` | Per-route cache TTLs. |
 | `<MARKETPLACE>_PROVIDER_MODE` | `scraper` \| `api` \| `auto` — only meaningful for `amazon`/`flipkart`, the two marketplaces with a real official API as an alternative to scraping. |
 | `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX` | App-wide default rate limit (`apiLimiter`, applied globally in `app.js`) — default 20 requests/minute per IP. Route-specific limiters (`AUTH_RATE_LIMIT_*`, and `/compare-url`'s own 10/min) are stricter and stack on top of this, not instead of it. |
 | `PRICE_REFRESHER_CRON` | Cron pattern for the price-refresher job (`node-cron`), default every 6 hours. |
@@ -163,6 +164,18 @@ Rate-limited (`AUTH_RATE_LIMIT_*`), stricter than the app-wide default. `signup`
 - `POST /compare-url` is rate-limited to 10 requests/minute (scraping-heavy). `url` must be a well-formed URL from a supported marketplace, or this returns `400` naming the marketplaces it does recognize.
 - `result.aiSummary` is a short, AI-generated, plain-English take on which listing is the better deal (via OpenRouter, `src/services/aiComparison.service.js`) — **optional**: it's `null` whenever `OPENROUTER_API_KEY` isn't set, there are no genuine cross-marketplace matches, or the call fails/times out/hits the free model's rate limit. It never blocks or fails the rest of the response — the algorithmic `results[]`/`similarityScore` ranking (which decides *which* products are matches in the first place) doesn't depend on it at all.
 
+### Categories — `/api/categories`
+
+| Method | Path | Auth | Query | Response |
+|---|---|---|---|---|
+| GET | `/` | — | — | `200` `{ success, count, categories }` — `categories[]` is `{ category, count }`, alphabetical |
+| GET | `/:category/products` | — | `?sortBy=price_asc\|price_desc\|rating&page=&limit=` | `200` `{ success, result }` — `result.products`, `result.total`, `result.totalPages`, `result.page`, `result.limit` |
+
+- This browses the **already-persisted catalog** — products a prior `/search` or `/compare-url` call already found and saved — it never triggers a live marketplace fetch the way `/search` does. A category with nothing saved for it yet returns an empty list, not an error.
+- `category` matching is **case-insensitive** (MongoDB collation, not a regex) — `/categories/headphones/products` and `/categories/Headphones/products` are the same request.
+- Coverage is partial by nature: only `myntra`/`nykaa`/`poorvika`/`vijaysales` currently extract a category from their source pages (via breadcrumb parsing); `amazon`/`flipkart`/`lenskart` leave it unset. That's an honest reflection of what those adapters' source pages actually expose, not a bug.
+- `limit` is capped at 50; default `page=1`, `limit=20`.
+
 ### Wishlist — `/api/wishlist` 🔒 (every route)
 
 | Method | Path | Body | Response |
@@ -217,7 +230,7 @@ The connection also sends a comment-only `: ping` line every 25 seconds (keeps i
 
 Two different layers, depending on the route:
 
-- **HTTP-level** (`src/middleware/cache.middleware.js`, a `cacheResponse()` wrapper) — used by `GET /products/:id`, `POST /compare-url`, and `GET /notifications`. Every response through this layer carries an `X-Cache: HIT` or `MISS` header. On a HIT, the request never reaches the controller at all.
+- **HTTP-level** (`src/middleware/cache.middleware.js`, a `cacheResponse()` wrapper) — used by `GET /products/:id`, `POST /compare-url`, `GET /notifications`, and both category routes. Every response through this layer carries an `X-Cache: HIT` or `MISS` header. On a HIT, the request never reaches the controller at all.
 - **Service-level** (`src/utils/cache.js`'s `getOrSet()`, a plain cache-aside) — used by `GET /search`. `product.service.js`'s `searchAndPersist()` caches the expensive part (the live multi-marketplace fetch + persist) by query text alone, but the controller **always** runs regardless of hit/miss - no `X-Cache` header here, and no route ever short-circuits before reaching it.
 
 That split exists on purpose. Search used to be HTTP-level-cached too (guest-only), because a cache HIT skipping the controller would also skip search-history recording for a logged-in user - so authenticated search had to opt out of caching entirely just to keep history working. Moving the cache one layer down decouples the two: the shared, expensive fetch is cached for **everyone** (guest or logged in, and shared with `compare-url`'s own internal title search), while history recording - a side effect on every real search, cached or not - can no longer be silently skipped by a cache hit. See `product.service.js`'s own header comment on `searchAndPersist` for the full reasoning, and `tests/integration/routes/product.routes.test.js`'s `"a repeat authenticated search hits the marketplace fetch only ONCE, but records history BOTH times"` test for the proof.
