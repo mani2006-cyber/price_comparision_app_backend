@@ -44,46 +44,41 @@ beforeEach(function() {
     jest.clearAllMocks();
     cache.set.mockResolvedValue(true);
     cache.del.mockResolvedValue(true);
+    // The whole cache module is auto-mocked in this file, which replaces
+    // getOrSet with a stub returning undefined by default - but
+    // product.service.js's searchAndPersist (exercised via GET /api/search
+    // below) destructures its return value, so a bare auto-mock would
+    // throw. This pass-through implementation (always "fresh", real
+    // fetchFn always called) keeps that code path working exactly like
+    // Redis being disabled would, without needing to hand-simulate real
+    // cache hit/miss semantics here - that's covered properly in
+    // product.service.test.js instead.
+    cache.getOrSet.mockImplementation(async function(key, ttl, fetchFn) {
+        return { value: await fetchFn(), fromCache: false };
+    });
 });
-describe('GET /api/search caching', function() {
-    it('sets X-Cache: MISS and stores the response when the cache is empty (guest request)', async function() {
-        cache.get.mockResolvedValue(null); // simulate a cache miss
+// GET /api/search does NOT use this HTTP-level cache.middleware.js
+// anymore - it used to (guest-only, via the same cacheResponse() this
+// file tests below for /products/:id), but that meant a cache HIT
+// short-circuited before the controller ever ran, which is also where
+// search history gets recorded - so an authenticated search had to skip
+// caching ENTIRELY, guest or not, just to guarantee history kept
+// working. The cache moved one layer down instead: product.service.js's
+// searchAndPersist() now caches the expensive marketplace-fetch step
+// itself, while the controller (and therefore history recording) always
+// runs regardless. See tests/integration/services/product.service.test.js
+// for coverage of that cache-aside, and product.routes.test.js's
+// "records search history when authenticated" test (now proven to
+// benefit from caching too, not just guests) for the end-to-end route
+// behavior.
+describe('GET /api/search - no HTTP-level caching', function() {
+    it('never sets an X-Cache header - this route has no cache.middleware.js in its chain at all anymore', async function() {
         adapters.searchAllMarketplaces.mockResolvedValue({ results: [fakeProduct()], failures: [] });
 
         const res = await request(app).get('/api/search').query({ q: 'laptop' });
 
         expect(res.status).toBe(200);
-        expect(res.headers['x-cache']).toBe('MISS');
-        expect(cache.set).toHaveBeenCalledTimes(1); // the middleware wrote the response to cache
-    });
-
-    it('returns the cached body directly with X-Cache: HIT, WITHOUT calling adapters at all', async function() {
-        const cachedBody = { success: true, query: 'laptop', resultCount: 1, products: [fakeProduct()], marketplaceFailures: [] };
-        cache.get.mockResolvedValue(cachedBody); // simulate a cache hit
-
-        const res = await request(app).get('/api/search').query({ q: 'laptop' });
-
-        expect(res.status).toBe(200);
-        expect(res.headers['x-cache']).toBe('HIT');
-        expect(res.body).toEqual(cachedBody);
-        // The whole point of a cache HIT: the expensive marketplace search
-        // never runs at all.
-        expect(adapters.searchAllMarketplaces).not.toHaveBeenCalled();
-    });
-
-    it('SKIPS the cache entirely for an authenticated request (side-effect safety)', async function() {
-        cache.get.mockResolvedValue({ success: true, products: ['should never be returned'] });
-        adapters.searchAllMarketplaces.mockResolvedValue({ results: [fakeProduct()], failures: [] });
-
-        const res = await request(app)
-            .get('/api/search')
-            .query({ q: 'laptop' })
-            .set('Authorization', 'Bearer fake-token-value'); // presence alone is enough to trigger skip()
-
-        // An authenticated request must never short-circuit on a cached
-        // body - it has a side effect (history recording) a cache hit would
-        // silently bypass. cache.get should not even be consulted.
-        expect(cache.get).not.toHaveBeenCalled();
+        expect(res.headers['x-cache']).toBeUndefined();
     });
 });
 

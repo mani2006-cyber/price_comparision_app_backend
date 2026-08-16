@@ -138,3 +138,57 @@ describe('full flow: create -> list -> cancel, with ownership checks', function(
         expect(secondCancel.status).toBe(404);
     });
 });
+
+describe('DELETE /api/alerts/:id', function() {
+    it('rejects a request with no access token', async function() {
+        const res = await request(app).delete('/api/alerts/000000000000000000000000');
+        expect(res.status).toBe(401);
+    });
+
+    it('rejects deletion by a different user with a 404, and does not delete it', async function() {
+        const createRes = await request(app)
+            .post('/api/alerts')
+            .set('Authorization', 'Bearer ' + tokenA)
+            .send({ productId: product._id.toString(), targetPrice: 45000 });
+        const alertId = createRes.body.alert._id;
+
+        const wrongDelete = await request(app)
+            .delete('/api/alerts/' + alertId)
+            .set('Authorization', 'Bearer ' + tokenB);
+        expect(wrongDelete.status).toBe(404);
+
+        const listRes = await request(app).get('/api/alerts').set('Authorization', 'Bearer ' + tokenA);
+        expect(listRes.body.count).toBe(1); // still there
+    });
+
+    it('deletes the alert for the actual owner, removing it from the list', async function() {
+        const createRes = await request(app)
+            .post('/api/alerts')
+            .set('Authorization', 'Bearer ' + tokenA)
+            .send({ productId: product._id.toString(), targetPrice: 45000 });
+        const alertId = createRes.body.alert._id;
+
+        const deleteRes = await request(app)
+            .delete('/api/alerts/' + alertId)
+            .set('Authorization', 'Bearer ' + tokenA);
+        expect(deleteRes.status).toBe(200);
+
+        const listRes = await request(app).get('/api/alerts').set('Authorization', 'Bearer ' + tokenA);
+        expect(listRes.body.count).toBe(0);
+    });
+
+    it('deletes an already-cancelled alert too (unlike cancel, delete is not status-restricted)', async function() {
+        const createRes = await request(app)
+            .post('/api/alerts')
+            .set('Authorization', 'Bearer ' + tokenA)
+            .send({ productId: product._id.toString(), targetPrice: 45000 });
+        const alertId = createRes.body.alert._id;
+
+        await request(app).post('/api/alerts/' + alertId + '/cancel').set('Authorization', 'Bearer ' + tokenA);
+
+        const deleteRes = await request(app)
+            .delete('/api/alerts/' + alertId)
+            .set('Authorization', 'Bearer ' + tokenA);
+        expect(deleteRes.status).toBe(200);
+    });
+});

@@ -125,3 +125,11 @@ coverage/
 *.pid
 *.seed
 *.orig
+
+# ==================================================
+# Separate nested project - its own git repo, own
+# dependencies, kept only as local reference material
+# for porting scraper logic into src/adapters/. Never
+# part of this project's own history.
+# ==================================================
+/src/scraper/

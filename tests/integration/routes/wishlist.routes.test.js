@@ -87,7 +87,7 @@ describe('POST /api/wishlist', function() {
     });
 });
 
-describe('full flow: add -> list -> history -> remove, with ownership checks', function() {
+describe('full flow: add -> list -> remove, with ownership checks', function() {
     it('walks the entire wishlist lifecycle and enforces ownership at every step', async function() {
         const addRes = await request(app)
             .post('/api/wishlist')
@@ -98,12 +98,6 @@ describe('full flow: add -> list -> history -> remove, with ownership checks', f
         // List - userA sees it
         const listRes = await request(app).get('/api/wishlist').set('Authorization', 'Bearer ' + tokenA);
         expect(listRes.body.count).toBe(1);
-
-        // Price history - accessible to owner
-        const historyRes = await request(app)
-            .get('/api/wishlist/' + itemId + '/history')
-            .set('Authorization', 'Bearer ' + tokenA);
-        expect(historyRes.status).toBe(200);
 
         // userB cannot delete userA's item
         const wrongDelete = await request(app)

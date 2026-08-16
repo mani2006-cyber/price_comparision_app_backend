@@ -1,20 +1,28 @@
 // tests/unit/server.test.js
 //
 // Unit tests for server.js's start()/shutdown() logic - everything it
-// touches (Mongo, the HTTP listener, Redis, the price-refresher
-// queue/job) is mocked, so this needs no real network/DB/Redis and
-// never actually boots a server or registers real process signal
-// handlers (server.js's own require.main guard - see its header
+// touches (Mongo, the HTTP listener, Redis, the price-refresher job,
+// the notification bus) is mocked, so this needs no real network/DB/
+// Redis and never actually boots a server or registers real process
+// signal handlers (server.js's own require.main guard - see its header
 // comment - only does that when run directly, not when required here).
 //
 // This is the test that would have caught the graceful-shutdown gap
-// flagged in the previous session: attempting to verify shutdown() by
+// flagged in an earlier session: attempting to verify shutdown() by
 // sending a real SIGINT to a live `node server.js` process on Windows
 // didn't reliably trigger the JS-level handler at all (a known Node-on-
 // Windows cross-process signal-emulation limitation, not a code bug) -
 // calling shutdown() directly, as a plain function, sidesteps that
 // platform issue entirely and is the more reliable test regardless of
 // platform.
+//
+// priceRefresherJob is now the ONLY scheduling path server.js calls
+// (always node-cron, unconditional on config.redis.enabled) - it used
+// to branch to src/queues/priceRefresher.queue.js (BullMQ) when Redis
+// was enabled, reverted after BullMQ's Job Scheduler "catch up on a
+// missed occurrence" behavior turned out to mean this job ran a full
+// batch of live marketplace re-fetches immediately on every server
+// restart - see server.js's own header comment for the full story.
 
 'use strict';
 
@@ -26,9 +34,6 @@ jest.mock('../../src/config/redis', function() {
 });
 jest.mock('../../src/jobs/priceRefresher.job', function() {
     return { start: jest.fn() };
-});
-jest.mock('../../src/queues/priceRefresher.queue', function() {
-    return { start: jest.fn(), close: jest.fn() };
 });
 jest.mock('../../src/realtime/notificationBus', function() {
     return { publish: jest.fn(), subscribe: jest.fn(), close: jest.fn() };
@@ -48,12 +53,8 @@ function mockServerInstance() {
 // `connectDB`/`app`/etc.) as a module-top-level const - the usual
 // pattern - would leave that const pointing at a STALE instance after
 // the first reset, different from the fresh one server.js itself
-// re-requires internally; mutating config.redis.enabled on the stale
-// object would then silently have no effect on the code actually under
-// test (this bit early drafts of this file: every "starts the BullMQ
-// queue when Redis is enabled"-style assertion failed even though the
-// real code path was correct). Re-requiring EVERY dependency fresh
-// INSIDE loadServer(), right alongside server.js itself, keeps them all
+// re-requires internally. Re-requiring EVERY dependency fresh INSIDE
+// loadServer(), right alongside server.js itself, keeps them all
 // pointed at the same instances server.js is actually calling.
 function loadServer(options) {
     jest.resetModules();
@@ -69,7 +70,6 @@ function loadServer(options) {
         disconnectDB: require('../../src/config/db').disconnectDB,
         disconnectRedis: require('../../src/config/redis').disconnectRedis,
         priceRefresherJob: require('../../src/jobs/priceRefresher.job'),
-        priceRefresherQueue: require('../../src/queues/priceRefresher.queue'),
         notificationBus: require('../../src/realtime/notificationBus'),
         app: require('../../src/app'),
     };
@@ -77,8 +77,6 @@ function loadServer(options) {
     deps.connectDB.mockResolvedValue(undefined);
     deps.disconnectDB.mockResolvedValue(undefined);
     deps.disconnectRedis.mockResolvedValue(undefined);
-    deps.priceRefresherQueue.start.mockResolvedValue(undefined);
-    deps.priceRefresherQueue.close.mockResolvedValue(undefined);
     deps.notificationBus.close.mockResolvedValue(undefined);
     deps.app.listen.mockImplementation(function(port, cb) {
         if (cb) cb();
@@ -118,62 +116,38 @@ describe('start()', function() {
         expect(deps.app.listen).not.toHaveBeenCalled();
     });
 
-    it('starts the BullMQ price-refresher queue when Redis is enabled', async function() {
-        const { server, deps } = loadServer({ redisEnabled: true });
+    it('starts the price-refresher job (node-cron) unconditionally, regardless of Redis', async function() {
+        const enabled = loadServer({ redisEnabled: true });
+        await enabled.server.start();
+        expect(enabled.deps.priceRefresherJob.start).toHaveBeenCalledTimes(1);
 
-        await server.start();
-        await Promise.resolve(); // let the .listen callback's async work settle
-
-        expect(deps.priceRefresherQueue.start).toHaveBeenCalledTimes(1);
-        expect(deps.priceRefresherJob.start).not.toHaveBeenCalled();
-    });
-
-    it('falls back to the node-cron job when Redis is disabled', async function() {
-        const { server, deps } = loadServer({ redisEnabled: false });
-
-        await server.start();
-
-        expect(deps.priceRefresherJob.start).toHaveBeenCalledTimes(1);
-        expect(deps.priceRefresherQueue.start).not.toHaveBeenCalled();
-    });
-
-    it('falls back to the node-cron job when the BullMQ queue fails to start', async function() {
-        const { server, deps } = loadServer({ redisEnabled: true });
-        deps.priceRefresherQueue.start.mockRejectedValue(new Error('Redis unreachable'));
-
-        await server.start();
-        await Promise.resolve().then(function() {}).then(function() {}); // let the rejection's .catch handler run
-
-        expect(deps.priceRefresherJob.start).toHaveBeenCalledTimes(1);
+        const disabled = loadServer({ redisEnabled: false });
+        await disabled.server.start();
+        expect(disabled.deps.priceRefresherJob.start).toHaveBeenCalledTimes(1);
     });
 });
 
 describe('shutdown()', function() {
-    it('closes the price-refresher queue, disconnects Mongo and Redis, then exits 0', async function() {
+    it('closes the notification bus, disconnects Mongo and Redis, then exits 0', async function() {
         const { server, deps } = loadServer({ redisEnabled: true });
         await server.start();
 
         server.shutdown('SIGTERM');
         await new Promise(function(resolve) { setImmediate(resolve); }); // flush the server.close() callback's async chain
 
-        expect(deps.priceRefresherQueue.close).toHaveBeenCalledTimes(1);
         expect(deps.notificationBus.close).toHaveBeenCalledTimes(1);
         expect(deps.disconnectDB).toHaveBeenCalledTimes(1);
         expect(deps.disconnectRedis).toHaveBeenCalledTimes(1);
         expect(processExitSpy).toHaveBeenCalledWith(0);
     });
 
-    it('does not touch the price-refresher queue when Redis was never enabled, but still closes the notification bus', async function() {
+    it('still closes the notification bus even when Redis was never enabled (always safe/a no-op if nothing was opened)', async function() {
         const { server, deps } = loadServer({ redisEnabled: false });
         await server.start();
 
         server.shutdown('SIGTERM');
         await new Promise(function(resolve) { setImmediate(resolve); });
 
-        expect(deps.priceRefresherQueue.close).not.toHaveBeenCalled();
-        // Unlike the queue, notificationBus.close() is NOT gated on
-        // config.redis.enabled - it's always safe/a no-op if nothing was
-        // ever opened, so shutdown always calls it regardless.
         expect(deps.notificationBus.close).toHaveBeenCalledTimes(1);
         expect(deps.disconnectDB).toHaveBeenCalledTimes(1);
     });

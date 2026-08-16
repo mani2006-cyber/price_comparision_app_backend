@@ -14,6 +14,7 @@ const ApiError = require('../utils/ApiError');
 const adapters = require('../adapters');
 const productService = require('./product.service');
 const { rankByCombinedMatch } = require('../utils/similarity');
+const aiComparisonService = require('./aiComparison.service');
 const logger = require('../utils/logger');
 
 async function compareByUrl(url) {
@@ -42,9 +43,10 @@ async function compareByUrl(url) {
 
     // ── 1. Fetch + persist the ORIGINAL product ─────────────────────────
     // refreshProductByLink already upserts through product.repository.js,
-    // which handles price-change detection and PriceHistory recording
-    // automatically (File 17) - no separate "record this observation"
-    // step needed here, unlike the old codebase's fire-and-forget call.
+    // which handles price-change detection and lowestPrice/highestPrice
+    // tracking automatically (File 17) - no separate "record this
+    // observation" step needed here, unlike the old codebase's
+    // fire-and-forget call.
     const originalOutcome = await productService.refreshProductByLink(url);
     const originalProduct = originalOutcome.product;
 
@@ -93,11 +95,17 @@ async function compareByUrl(url) {
 
     allResults.sort(function(a, b) { return a.currentPrice - b.currentPrice; });
 
+    // ── 6. Optional AI-generated summary (never blocks/fails the request -
+    // see aiComparison.service.js's own comment; null when no API key is
+    // configured, no genuine matches were found, or the call fails). ──────
+    const aiSummary = await aiComparisonService.generateComparisonSummary(originalProduct, goodMatches);
+
     logger.info('Compare-url completed', {
         url,
         marketplace,
         candidateCount: candidates.length,
         matchesFound: goodMatches.length,
+        aiSummaryGenerated: !!aiSummary,
     });
 
     return {
@@ -106,6 +114,7 @@ async function compareByUrl(url) {
         matchesFound: goodMatches.length,
         results: allResults,
         marketplaceFailures: searchResult.marketplaceFailures,
+        aiSummary: aiSummary,
     };
 }
 

@@ -1,7 +1,7 @@
 // src/services/wishlist.service.js
 //
 // Business logic for the wishlist. Wraps wishlist.repository.js and
-// priceHistory.repository.js - controllers never touch either directly.
+// product.repository.js - controllers never touch either directly.
 // A wishlist entry is a REFERENCE to a Product, never a snapshot (see
 // Wishlist.model.js / File 11) - addToWishlist takes a productId, not
 // raw product data.
@@ -11,9 +11,6 @@
 const ApiError = require('../utils/ApiError');
 const wishlistRepository = require('../repositories/wishlist.repository');
 const productRepository = require('../repositories/product.repository');
-const priceHistoryRepository = require('../repositories/priceHistory.repository');
-
-const RECENT_HISTORY_DAYS = 30;
 
 // ── Add ──────────────────────────────────────────────────────────────
 async function addToWishlist(userId, productId, notes) {
@@ -33,37 +30,12 @@ async function addToWishlist(userId, productId, notes) {
     return wishlistRepository.addItem(userId, productId, notes);
 }
 
-// ── List (with recent price history per item) ───────────────────────
-async function getWishlistWithPriceHistory(userId) {
-    const items = await wishlistRepository.findByUser(userId);
-
-    const since = new Date(Date.now() - RECENT_HISTORY_DAYS * 24 * 60 * 60 * 1000);
-
-    const withHistory = await Promise.all(
-        items.map(async function(item) {
-            // productId is already populated by findByUser (File 18) - if a
-            // referenced Product was ever deleted, populate() leaves this
-            // null rather than throwing; skip history lookup in that edge case.
-            if (!item.productId) {
-                return { item, priceHistory: [] };
-            }
-
-            const priceHistory = await priceHistoryRepository.findByProduct(item.productId._id, since);
-            return { item, priceHistory };
-        })
-    );
-
-    return withHistory;
-}
-
-// ── Single item's full price history (not capped to 30 days) ────────
-async function getItemPriceHistory(itemId, userId) {
-    const item = await wishlistRepository.findByIdForUser(itemId, userId);
-    if (!item) {
-        throw ApiError.notFound('Wishlist item not found');
-    }
-
-    return priceHistoryRepository.findByProduct(item.productId._id);
+// ── List ─────────────────────────────────────────────────────────────
+// Product data (price, title, stock...) is populated live via
+// wishlistRepository.findByUser's own .populate() - never a stale
+// snapshot - so no separate per-item enrichment step is needed here.
+async function getWishlist(userId) {
+    return wishlistRepository.findByUser(userId);
 }
 
 // ── Remove ───────────────────────────────────────────────────────────
@@ -79,7 +51,6 @@ async function removeFromWishlist(itemId, userId) {
 
 module.exports = {
     addToWishlist,
-    getWishlistWithPriceHistory,
-    getItemPriceHistory,
+    getWishlist,
     removeFromWishlist,
 };

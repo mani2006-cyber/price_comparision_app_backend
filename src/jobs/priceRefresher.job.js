@@ -1,12 +1,22 @@
 // src/jobs/priceRefresher.job.js
 //
-// Scheduled job: finds stale products, re-fetches each via its stored
-// rawUrl, re-upserts (which handles price-change detection + PriceHistory
-// recording automatically via product.repository.js), and checks alerts
-// for any product whose price changed. Processes products SEQUENTIALLY
-// with a delay between each - a background job has no urgency, and
-// concurrent requests here risk getting the whole app rate-limited by a
-// marketplace, hurting every user's live searches, not just this job.
+// Scheduled job: finds stale products that at least one user has an
+// ACTIVE price alert on, re-fetches each via its stored rawUrl,
+// re-upserts (which handles price-change detection + lowestPrice/
+// highestPrice tracking automatically via product.repository.js), and
+// checks alerts for any product whose price changed. Processes products
+// SEQUENTIALLY with a delay between each - a background job has no urgency, and
+// concurrent requests here risk getting the whole app rate-limited (or
+// outright IP-blocked) by a marketplace, hurting every user's live
+// searches, not just this job.
+//
+// Scoped to alerted products ONLY - not "every stale product in the
+// catalog" (findStale, still available for other callers, is not used
+// here anymore). Re-checking the whole catalog on a fixed schedule
+// meant hundreds of live re-fetches every cycle for products nobody
+// was waiting on a price drop for - real, avoidable request volume
+// against real marketplaces for no user benefit. See
+// product.repository.js's findStaleWithActiveAlerts.
 
 'use strict';
 
@@ -66,7 +76,7 @@ async function refreshOne(product) {
 // for a real cron tick ─────────────────────────────────────────────
 async function runOnce() {
     const staleThreshold = new Date(Date.now() - STALE_THRESHOLD_MS);
-    const staleProducts = await productRepository.findStale(staleThreshold, BATCH_LIMIT);
+    const staleProducts = await productRepository.findStaleWithActiveAlerts(staleThreshold, BATCH_LIMIT);
 
     logger.info('Price refresher run started', { staleCount: staleProducts.length });
 
@@ -102,6 +112,18 @@ async function runOnce() {
 
 // ── Wires runOnce to the configured cron schedule. Called explicitly by
 // server.js - this file does not self-start on require() ─────────────
+//
+// node-cron's schedule() registers the pattern and returns immediately
+// - it does NOT run the callback right away, and does NOT "catch up" on
+// a missed occurrence if the process was down when one was due (unlike
+// BullMQ's Job Scheduler, which this job used to run through - see
+// src/queues/priceRefresher.queue.js's own header comment for that
+// history). The first real run only happens at the next time the cron
+// pattern actually matches. That's deliberate here: this job now hits
+// live marketplaces on startup was the actual bug report that led to
+// scoping it to alerted products only (see this file's header comment)
+// - starting immediately on every server boot besides would have kept
+// that risk alive even with a smaller candidate set.
 function start() {
     cron.schedule(config.priceRefresher.cronSchedule, function() {
         runOnce().catch(function(err) {

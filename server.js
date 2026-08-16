@@ -14,9 +14,23 @@ const logger = require('./src/utils/logger');
 const { connectDB, disconnectDB } = require('./src/config/db');
 const app = require('./src/app');
 const priceRefresherJob = require('./src/jobs/priceRefresher.job');
-const priceRefresherQueue = require('./src/queues/priceRefresher.queue');
 const notificationBus = require('./src/realtime/notificationBus');
 const { disconnectRedis } = require('./src/config/redis');
+
+// NOTE: this used to run through src/queues/priceRefresher.queue.js
+// (BullMQ) when Redis was enabled, falling back to node-cron otherwise.
+// Reverted to always-node-cron: BullMQ's Job Scheduler "catches up" on
+// a missed occurrence the moment a Worker connects (see that file's own
+// header comment) - which meant this job ran a full batch of live
+// marketplace re-fetches immediately on every server restart if its
+// last scheduled tick had passed while the process was down. Combined
+// with re-checking the ENTIRE catalog (fixed in this same change -
+// see product.repository.js's findStaleWithActiveAlerts), that was a
+// real path to this app's own IP getting rate-limited/blocked by a
+// marketplace. node-cron has no such catch-up behavior - the first run
+// only ever happens at the next real scheduled time, full stop. The
+// BullMQ queue module itself is left in place (tested, unused) in case
+// a manually-triggered "refresh now" path is ever wanted later.
 
 const SHUTDOWN_TIMEOUT_MS = 10000;
 
@@ -41,22 +55,10 @@ async function start() {
         // Started after the HTTP server is up, not before - the refresher
         // has nothing to do with request-serving readiness, and this keeps
         // the startup log order honest: DB connected -> server listening ->
-        // background job scheduled.
-        //
-        // BullMQ needs Redis (no in-memory fallback); when Redis is
-        // disabled/unavailable (config.redis.enabled=false - e.g. a
-        // minimal local setup), fall back to the plain node-cron
-        // scheduler instead, so this job still runs somehow either way -
-        // the same "caching is optional infrastructure" posture
-        // src/config/redis.js already applies to this app.
-        if (config.redis.enabled) {
-            priceRefresherQueue.start().catch(function(err) {
-                logger.error('Failed to start price refresher queue, falling back to node-cron', err);
-                priceRefresherJob.start();
-            });
-        } else {
-            priceRefresherJob.start();
-        }
+        // background job scheduled. priceRefresherJob.start() only
+        // REGISTERS the cron schedule here - see that function's own doc
+        // comment for why this does not run anything immediately.
+        priceRefresherJob.start();
     });
 }
 
@@ -79,18 +81,10 @@ function shutdown(signal) {
         // No new connections accepted from this point on; in-flight
         // requests have already finished by the time this callback fires.
         try {
-            if (config.redis.enabled) {
-                // Lets the Worker finish whatever job it's mid-run on
-                // (bounded by its own internal grace period) instead of
-                // yanking the Redis connection out from under it.
-                await priceRefresherQueue.close();
-            }
             // Always safe to call even if no SSE client ever connected -
             // notificationBus.close() only quits connections that were
-            // actually opened (unlike priceRefresherQueue above, this
-            // isn't gated on config.redis.enabled: in local-only mode it
-            // never opened any Redis connection to begin with, so this is
-            // just a harmless no-op rather than something to skip).
+            // actually opened, a harmless no-op in local-only mode
+            // (Redis disabled) where it never opened one to begin with.
             await notificationBus.close();
             await disconnectDB();
             await disconnectRedis();

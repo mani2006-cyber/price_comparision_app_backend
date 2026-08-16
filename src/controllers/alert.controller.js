@@ -33,4 +33,9 @@ async function cancelAlert(req, res) {
     res.status(200).json({ success: true, alert });
 }
 
-module.exports = { createAlert, getAlerts, cancelAlert };
+async function deleteAlert(req, res) {
+    await alertService.deleteAlert(req.params.id, req.userId);
+    res.status(200).json({ success: true, message: 'Alert deleted' });
+}
+
+module.exports = { createAlert, getAlerts, cancelAlert, deleteAlert };

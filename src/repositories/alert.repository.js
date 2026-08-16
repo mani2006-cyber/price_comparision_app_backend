@@ -63,6 +63,18 @@ async function cancelByIdForUser(alertId, userId) {
     return Alert.findOneAndUpdate({ _id: alertId, userId, status: 'active' }, { status: 'cancelled' }, { new: true });
 }
 
+// ── Delete ───────────────────────────────────────────────────────────
+
+// Hard delete, ownership-scoped exactly like wishlist's removeByIdForUser -
+// unlike cancelByIdForUser, this is NOT restricted to status: 'active'.
+// Cancelling only makes sense for an active alert (there's a live
+// subscription to stop); deleting is "remove this from my list" and
+// should work regardless of whether the alert is active, already
+// triggered, or already cancelled.
+async function removeByIdForUser(alertId, userId) {
+    return Alert.deleteOne({ _id: alertId, userId });
+}
+
 module.exports = {
     create,
     findByUser,
@@ -71,4 +83,5 @@ module.exports = {
     countActiveByUser,
     markTriggered,
     cancelByIdForUser,
+    removeByIdForUser,
 };

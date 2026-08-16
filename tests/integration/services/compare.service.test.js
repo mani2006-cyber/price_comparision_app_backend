@@ -9,11 +9,13 @@
 'use strict';
 
 jest.mock('../../../src/adapters');
+jest.mock('../../../src/services/aiComparison.service');
 
 const mongoose = require('mongoose');
 const config = require('../../../src/config/env');
 const Product = require('../../../src/models/Product.model');
 const adapters = require('../../../src/adapters');
+const aiComparisonService = require('../../../src/services/aiComparison.service');
 const compareService = require('../../../src/services/compare.service');
 
 function fakeProduct(overrides) {
@@ -168,5 +170,47 @@ describe('compareByUrl', function() {
 
         const flipkartMatches = result.results.filter(function(r) { return r.marketplace === 'flipkart'; });
         expect(flipkartMatches).toHaveLength(1); // not 3
+    });
+
+    describe('aiSummary', function() {
+        it('surfaces the AI service\'s summary on the result, called with the original + the actual good matches', async function() {
+            adapters.detectMarketplaceFromUrl.mockReturnValue('amazon');
+            adapters.searchByLink.mockResolvedValue(fakeProduct());
+            adapters.searchAllMarketplaces.mockResolvedValue({
+                results: [
+                    fakeProduct(),
+                    fakeProduct({ marketplace: 'flipkart', externalId: 'CMPTEST_MATCH', title: 'Apple iPhone 16 128 GB Black', currentPrice: 67900 }),
+                ],
+                failures: [],
+            });
+            aiComparisonService.generateComparisonSummary.mockResolvedValue('Amazon is the better deal here.');
+
+            const result = await compareService.compareByUrl('https://www.amazon.in/dp/CMPTEST_ORIG');
+
+            expect(result.aiSummary).toBe('Amazon is the better deal here.');
+            expect(aiComparisonService.generateComparisonSummary).toHaveBeenCalledTimes(1);
+            const [passedOriginal, passedMatches] = aiComparisonService.generateComparisonSummary.mock.calls[0];
+            expect(passedOriginal.externalId).toBe('CMPTEST_ORIG');
+            expect(passedMatches).toHaveLength(1);
+            expect(passedMatches[0].marketplace).toBe('flipkart');
+        });
+
+        it('leaves aiSummary null without failing the whole request when the AI service reports nothing', async function() {
+            adapters.detectMarketplaceFromUrl.mockReturnValue('amazon');
+            adapters.searchByLink.mockResolvedValue(fakeProduct());
+            adapters.searchAllMarketplaces.mockResolvedValue({
+                results: [
+                    fakeProduct(),
+                    fakeProduct({ marketplace: 'flipkart', externalId: 'CMPTEST_MATCH', title: 'Apple iPhone 16 128 GB Black', currentPrice: 67900 }),
+                ],
+                failures: [],
+            });
+            aiComparisonService.generateComparisonSummary.mockResolvedValue(null);
+
+            const result = await compareService.compareByUrl('https://www.amazon.in/dp/CMPTEST_ORIG');
+
+            expect(result.aiSummary).toBeNull();
+            expect(result.matchesFound).toBe(1); // the rest of the response is unaffected
+        });
     });
 });

@@ -3,12 +3,15 @@
 // All direct Mongoose access for the Product collection. Owns the
 // upsert-by-identity logic (marketplace + externalId) that every
 // provider adapter's output flows through - this is the ONE place
-// price-extreme tracking and price-change detection happen.
+// price-extreme tracking (lowestPrice/highestPrice) and price-change
+// detection happen. There is no separate per-observation price-history
+// log anymore - lowestPrice/highestPrice on the Product document itself
+// are the only price-extreme data this app keeps.
 
 'use strict';
 
 const Product = require('../models/Product.model');
-const PriceHistory = require('../models/PriceHistory.model');
+const Alert = require('../models/Alert.model');
 const cache = require('../utils/cache');
 
 // ── Reads ────────────────────────────────────────────────────────────
@@ -25,8 +28,36 @@ async function findManyByIds(ids) {
     return Product.find({ _id: { $in: ids } });
 }
 
+// Kept for anything that genuinely wants "every stale product,
+// catalog-wide" - NOT used by the price-refresher job anymore (see
+// findStaleWithActiveAlerts below for why).
 async function findStale(olderThanDate, limit) {
     return Product.find({ lastCheckedAt: { $lt: olderThanDate } })
+        .sort({ lastCheckedAt: 1 })
+        .limit(limit || 100);
+}
+
+// The price-refresher job's real query: stale AND has at least one
+// ACTIVE alert riding on it. Re-checking the whole catalog on a fixed
+// schedule (the old findStale-based behavior) meant every product ever
+// searched - most of which nobody is waiting on a price drop for - got
+// a live re-fetch every cycle, which is both wasted work and a real
+// path to getting this app's own IP blocked by a marketplace for
+// request volume that serves no one. Alert.distinct('productId', ...)
+// first, then a plain Product query on that id list - two queries, not
+// one aggregation - because Alert and Product are separate collections
+// with no $lookup already wired up elsewhere in this codebase, and
+// this keeps both queries obvious/independently testable.
+async function findStaleWithActiveAlerts(olderThanDate, limit) {
+    const alertedProductIds = await Alert.distinct('productId', { status: 'active' });
+    if (alertedProductIds.length === 0) {
+        return [];
+    }
+
+    return Product.find({
+        _id: { $in: alertedProductIds },
+        lastCheckedAt: { $lt: olderThanDate },
+    })
         .sort({ lastCheckedAt: 1 })
         .limit(limit || 100);
 }
@@ -95,11 +126,6 @@ async function upsertFromProviderData(providerData, session) {
     });
 
     if (priceChanged) {
-        await PriceHistory.create(
-            [{ productId: existing._id, price: providerData.currentPrice, recordedAt: now }],
-            options
-        );
-
         // Invalidate any cached GET /api/products/:id response for this
         // product - it now holds a stale price. Search-result caches are
         // deliberately left to expire via their own short TTL instead: a
@@ -116,6 +142,7 @@ module.exports = {
     findByMarketplaceAndExternalId,
     findManyByIds,
     findStale,
+    findStaleWithActiveAlerts,
     searchByText,
     upsertFromProviderData,
 };

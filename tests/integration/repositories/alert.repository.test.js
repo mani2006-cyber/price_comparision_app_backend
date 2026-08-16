@@ -126,3 +126,33 @@ describe('cancelByIdForUser - ownership scoping', function() {
         expect(result.status).toBe('cancelled');
     });
 });
+
+describe('removeByIdForUser - ownership scoping', function() {
+    it('does NOT delete an alert belonging to a different user', async function() {
+        const alert = await alertRepository.create(userA._id, product._id, 45000);
+
+        const result = await alertRepository.removeByIdForUser(alert._id, userB._id);
+        expect(result.deletedCount).toBe(0);
+
+        const reloaded = await Alert.findById(alert._id);
+        expect(reloaded).not.toBeNull();
+    });
+
+    it('DOES delete when called by the actual owner', async function() {
+        const alert = await alertRepository.create(userA._id, product._id, 45000);
+
+        const result = await alertRepository.removeByIdForUser(alert._id, userA._id);
+        expect(result.deletedCount).toBe(1);
+
+        const reloaded = await Alert.findById(alert._id);
+        expect(reloaded).toBeNull();
+    });
+
+    it('deletes an alert regardless of status (unlike cancel, which is active-only)', async function() {
+        const alert = await alertRepository.create(userA._id, product._id, 48000);
+        await alertRepository.markTriggered(alert._id, 46000);
+
+        const result = await alertRepository.removeByIdForUser(alert._id, userA._id);
+        expect(result.deletedCount).toBe(1);
+    });
+});

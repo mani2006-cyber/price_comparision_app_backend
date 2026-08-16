@@ -8,6 +8,31 @@
 'use strict';
 
 jest.mock('../../../src/adapters');
+// A real in-memory fake, not a bare auto-mock - product.service.js's
+// searchAndPersist() calls cache.getOrSet() internally now (the search
+// cache moved from an HTTP middleware down to that service layer - see
+// product.service.js's own header comment), so this needs to actually
+// behave like a cache for the "authenticated search benefits from
+// caching too" test below to mean anything. Cleared in beforeEach so
+// nothing leaks between tests - every OTHER test in this file still
+// runs against a cold cache, unaffected.
+jest.mock('../../../src/utils/cache', function() {
+    const store = new Map();
+    return {
+        get: jest.fn(async function(key) { return store.has(key) ? store.get(key) : null; }),
+        set: jest.fn(async function(key, value) { store.set(key, value); return true; }),
+        del: jest.fn(async function(key) { return store.delete(key); }),
+        getOrSet: jest.fn(async function(key, ttlSeconds, fetchFn) {
+            if (store.has(key)) {
+                return { value: store.get(key), fromCache: true };
+            }
+            const fresh = await fetchFn();
+            store.set(key, fresh);
+            return { value: fresh, fromCache: false };
+        }),
+        __store: store,
+    };
+});
 
 const request = require('supertest');
 const mongoose = require('mongoose');
@@ -15,6 +40,7 @@ const config = require('../../../src/config/env');
 const User = require('../../../src/models/User.model');
 const Product = require('../../../src/models/Product.model');
 const adapters = require('../../../src/adapters');
+const cache = require('../../../src/utils/cache');
 const app = require('../../../src/app');
 
 const TEST_EMAIL = 'routetest-product@example.com';
@@ -46,6 +72,7 @@ afterAll(async function() {
 
 beforeEach(async function() {
     jest.clearAllMocks();
+    cache.__store.clear();
     await User.deleteMany({ email: TEST_EMAIL });
     await Product.deleteMany({ externalId: { $regex: /^ROUTETEST/ } });
 });
@@ -107,6 +134,33 @@ describe('GET /api/search', function() {
         expect(historyRes.status).toBe(200);
         expect(historyRes.body.history).toHaveLength(1);
         expect(historyRes.body.history[0].query).toBe('laptop');
+    });
+
+    // The actual fix this test proves: an authenticated user's repeat
+    // search USED TO force-bypass caching entirely (the old HTTP-level
+    // searchCache middleware skipped itself whenever an Authorization
+    // header was present, specifically so a cache hit couldn't skip
+    // history recording). Now caching lives in product.service.js
+    // instead, one layer below the controller, so both things are true
+    // at once: the expensive marketplace fetch only happens once, AND
+    // every search still gets recorded to history - not a tradeoff
+    // between the two anymore.
+    it('a repeat authenticated search hits the marketplace fetch only ONCE, but records history BOTH times', async function() {
+        adapters.searchAllMarketplaces.mockResolvedValue({ results: [fakeProduct()], failures: [] });
+
+        const signupRes = await request(app)
+            .post('/api/auth/signup')
+            .send({ name: 'Cache Route Test', email: TEST_EMAIL, password: 'plaintext123' });
+        const token = signupRes.body.accessToken;
+
+        await request(app).get('/api/search').query({ q: 'route cache test query' }).set('Authorization', 'Bearer ' + token);
+        await request(app).get('/api/search').query({ q: 'route cache test query' }).set('Authorization', 'Bearer ' + token);
+
+        expect(adapters.searchAllMarketplaces).toHaveBeenCalledTimes(1);
+
+        const historyRes = await request(app).get('/api/search/history').set('Authorization', 'Bearer ' + token);
+        expect(historyRes.body.history).toHaveLength(1); // same query upserts one row...
+        expect(historyRes.body.history[0].searchCount).toBe(2); // ...but both searches were counted
     });
 });
 

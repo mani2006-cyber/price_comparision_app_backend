@@ -34,14 +34,35 @@ async function fetchHtml(url) {
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
+// Real bug found live: this used to fall back to matching the `/p/<id>`
+// PATH segment (e.g. "itmee33cb4f8c0b2") when a URL had no `?pid=` query
+// param, and treated that as the pid. It isn't - Flipkart's `itm...` path
+// segment is a SEPARATE identifier (an item id) from the real pid (e.g.
+// "ACCG6DS7WDJHGWSH"), confirmed by fetching a real product page: its
+// canonical URL has no ?pid= at all, yet the page's own embedded JSON
+// carries the true pid, which does NOT match the uppercased itm-id. Since
+// Product documents are deduplicated on (marketplace, externalId), that
+// wrong fallback silently created a DUPLICATE document (keyed off the
+// fabricated itm-id) every time searchByLink refreshed a product whose
+// stored rawUrl happened to lack ?pid= - instead of updating the existing
+// one. Two real products in the live DB were affected this way. Query-param
+// extraction is still correct and cheap, so it stays as the fast path;
+// parseProductDetail additionally reads the real pid straight out of the
+// fetched page (extractPidFromHtml below) for when it's absent from the
+// URL - that never fabricates a wrong id, it just returns null instead.
 function extractPidFromUrl(url) {
     const queryMatch = url.match(/[?&]pid=([A-Z0-9]+)/i);
     if (queryMatch) return queryMatch[1].toUpperCase();
-
-    const pathMatch = url.match(/\/p\/([A-Z0-9]{16})(?:[/?]|$)/i);
-    if (pathMatch) return pathMatch[1].toUpperCase();
-
     return null;
+}
+
+// Product-detail pages embed the real pid in an inline JSON blob as
+// "pid":"<ID>" regardless of whether the page's own URL carries a ?pid=
+// query param - this is the authoritative source for parseProductDetail,
+// verified against a real page whose canonical URL had no ?pid= at all.
+function extractPidFromHtml(html) {
+    const m = html.match(/"pid"\s*:\s*"([A-Z0-9]+)"/i);
+    return m ? m[1].toUpperCase() : null;
 }
 
 function buildKeywords(title) {
@@ -82,7 +103,14 @@ function parseSearchResults(html) {
 
         const relativeUrl = el.find('a.k7wcnx').first().attr('href') || '';
         const productUrl = absoluteUrl(relativeUrl.split('&')[0]);
-        const pid = productUrl ? extractPidFromUrl(productUrl) : null;
+
+        // The card's own data-id attribute IS the real pid (confirmed live -
+        // matches the ?pid= query param on its own href exactly, when
+        // present) - reading it directly here is more reliable than parsing
+        // it back out of the href, since it doesn't depend on the href
+        // happening to carry ?pid= at all. See extractPidFromUrl's comment
+        // for why the href/URL should never be used to *guess* an id.
+        const pid = (el.attr('data-id') || '').toUpperCase() || null;
         if (!pid) continue; // no stable identity - skip
 
         const image = el.find('img').first().attr('src') || null;
@@ -106,6 +134,59 @@ function parseSearchResults(html) {
 }
 
 // ── Product detail page parsing ─────────────────────────────────────
+
+// Real bug found live: this function never extracted images at all,
+// which meant every product refreshed through it (compare-url's
+// "original" product, and - worse - the price-refresher job
+// re-upserting an EXISTING product) silently WIPED that product's
+// images back to [] on every refresh, even if a prior search had
+// already found real ones (upsertFromProviderData overwrites `images`
+// unconditionally with whatever this function returns - confirmed 10
+// real Flipkart products in the live DB already had their images
+// erased this way before this fix).
+//
+// Flipkart's real product-detail page embeds the gallery as plain
+// rukminim*.flixcart.com <img> tags with NO stable class name to key
+// off (Flipkart's classes are obfuscated/rotate periodically - same
+// caveat parseSearchResults' own comment already makes) - the one
+// stable signal is the URL shape itself: /image/<width>/<height>/...,
+// confirmed this product's own high-res gallery renders at width=800,
+// while thumbnails/nav dots reuse the SAME photo at width=80 and
+// unrelated "similar products"/promo images live under a different
+// path entirely (/www/.../promos/, /prod-fk-cms-brand-images/) or a
+// smaller width tier. Preferring width>=700 and only falling back to
+// width>=200 if a page genuinely has none of those is what keeps this
+// from pulling in a "frequently bought together" carousel's photos -
+// verified against two different real product pages (a phone and a
+// laptop): the width>=700 result matched exactly what searchByQuery
+// already returns for that same product.
+function extractGalleryImages($) {
+    function collect(minWidth) {
+        const seen = {};
+        const images = [];
+        $('img').each(function(_, el) {
+            const src = $(el).attr('src');
+            if (!src) return;
+            if (/cms-brand-images|\/promos\//.test(src)) return; // seller/brand badges, not product photos
+            const m = src.match(/rukminim\d*\.flixcart\.com\/image\/(\d+)\/(\d+)\//);
+            if (!m) return;
+            const width = parseInt(m[1], 10);
+            if (width < minWidth) return;
+            // Thumbnails are the SAME photo re-served at a smaller size -
+            // same hash-looking filename segment, different /W/H/ prefix -
+            // so dedupe on that filename, not the full URL.
+            const keyMatch = src.match(/\/([a-z0-9]{10,})\.(jpeg|jpg|png)/i);
+            const key = keyMatch ? keyMatch[1] : src;
+            if (seen[key]) return;
+            seen[key] = true;
+            images.push(src);
+        });
+        return images;
+    }
+
+    const highRes = collect(700);
+    return (highRes.length > 0 ? highRes : collect(200)).slice(0, 10);
+}
 
 function parseProductDetail(html, productUrl) {
     const $ = cheerio.load(html);
@@ -138,7 +219,10 @@ function parseProductDetail(html, productUrl) {
 
     if (price === null) return null;
 
-    const pid = extractPidFromUrl(productUrl);
+    // Prefer the pid embedded in the page itself (authoritative, present
+    // even when the URL has no ?pid=) - only fall back to the URL's query
+    // param if the page's own markup didn't have it for some reason.
+    const pid = extractPidFromHtml(html) || extractPidFromUrl(productUrl);
     if (!pid) return null;
 
     const brand = title.split(' ')[0];
@@ -148,6 +232,7 @@ function parseProductDetail(html, productUrl) {
         externalId: pid,
         title,
         brand,
+        images: extractGalleryImages($),
         currentPrice: price,
         currency: 'INR',
         rawUrl: productUrl,

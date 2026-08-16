@@ -19,13 +19,8 @@ async function addItem(req, res) {
 }
 
 async function getWishlist(req, res) {
-    const items = await wishlistService.getWishlistWithPriceHistory(req.userId);
+    const items = await wishlistService.getWishlist(req.userId);
     res.status(200).json({ success: true, count: items.length, items });
-}
-
-async function getItemHistory(req, res) {
-    const history = await wishlistService.getItemPriceHistory(req.params.id, req.userId);
-    res.status(200).json({ success: true, history });
 }
 
 async function removeItem(req, res) {
@@ -33,4 +28,4 @@ async function removeItem(req, res) {
     res.status(200).json({ success: true, message: 'Removed from wishlist' });
 }
 
-module.exports = { addItem, getWishlist, getItemHistory, removeItem };
+module.exports = { addItem, getWishlist, removeItem };

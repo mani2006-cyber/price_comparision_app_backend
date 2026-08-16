@@ -170,6 +170,17 @@ const config = {
             host: getString('FLIPKART_RAPIDAPI_HOST', 'real-time-flipkart-data2.p.rapidapi.com'),
         },
     },
+
+    // Optional - powers the AI-generated summary on /api/compare-url (see
+    // src/services/aiComparison.service.js). Same "no hard dependency"
+    // pattern as redis above: `enabled` is derived from whether a key is
+    // configured at all, never required to boot the app.
+    openRouter: {
+        enabled: !!getString('OPENROUTER_API_KEY', null),
+        apiKey: getString('OPENROUTER_API_KEY', null),
+        model: getString('OPENROUTER_MODEL', 'nvidia/nemotron-3-ultra-550b-a55b:free'),
+        timeoutMs: getNumber('OPENROUTER_TIMEOUT_MS', 20000),
+    },
 };
 
 // ── Cross-field validation ────────────────────────────────────────────

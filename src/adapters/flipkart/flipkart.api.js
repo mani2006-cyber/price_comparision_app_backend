@@ -42,15 +42,20 @@ function mapAvailability(value) {
     return known.indexOf(normalized) !== -1 ? normalized : 'unknown';
 }
 
+// Only used to build the /product-details REQUEST param below - the
+// externalId this adapter actually persists always comes from the
+// response itself (item.pid / data.pid), never from this guess. Used to
+// also fall back to matching the /p/<id> PATH segment, but that segment
+// is Flipkart's item id, NOT its pid - a genuinely different identifier
+// (confirmed against a real product page: its pid, embedded in the page's
+// own JSON, does not match its uppercased item-id). Sending that wrong
+// guess to RapidAPI as "pid" risked silently fetching a different
+// product's details entirely - see flipkart.scraper.js's matching fix
+// for the sibling bug this caused there (duplicate Product documents).
+// Failing cleanly (null) when the URL has no ?pid= is the safer behavior.
 function extractPidFromUrl(url) {
     const queryMatch = url.match(/[?&]pid=([A-Z0-9]+)/i);
     if (queryMatch) return queryMatch[1].toUpperCase();
-
-    // Fallback: some Flipkart URLs carry the pid as the final path segment
-    // after /p/ instead of a query param (seen in product-details samples).
-    const pathMatch = url.match(/\/p\/([A-Z0-9]{16})(?:[/?]|$)/i);
-    if (pathMatch) return pathMatch[1].toUpperCase();
-
     return null;
 }
 

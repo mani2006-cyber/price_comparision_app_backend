@@ -1,9 +1,8 @@
 // src/routes/wishlist.routes.js
 //
 // All wishlist endpoints require authentication - no optionalAuth here,
-// unlike product.routes.js's /search. Matches the route shapes from the
-// original PowerShell testing transcript: POST/GET /api/wishlist,
-// GET /api/wishlist/:id/history, DELETE /api/wishlist/:id.
+// unlike product.routes.js's /search: POST/GET /api/wishlist,
+// DELETE /api/wishlist/:id.
 
 'use strict';
 
@@ -20,7 +19,6 @@ router.use(requireAuth); // applies to every route below - entire file requires 
 
 router.post('/', validate({ body: addWishlistItemBodySchema }), asyncHandler(wishlistController.addItem));
 router.get('/', asyncHandler(wishlistController.getWishlist));
-router.get('/:id/history', asyncHandler(wishlistController.getItemHistory));
 router.delete('/:id', asyncHandler(wishlistController.removeItem));
 
 module.exports = router;

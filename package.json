@@ -14,6 +14,7 @@
         "test:watch": "cross-env NODE_ENV=test jest --runInBand --watch"
     },
     "dependencies": {
+        "@openrouter/sdk": "^1.2.37",
         "axios": "^1.7.9",
         "bcryptjs": "^2.4.3",
         "bullmq": "^6.1.0",

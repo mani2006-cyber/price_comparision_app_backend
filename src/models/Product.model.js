@@ -2,8 +2,9 @@
 //
 // One normalized document per unique real-world product, deduplicated by
 // (marketplace, externalId). This is the single shape every provider
-// adapter (scraper OR official API) resolves to. Referenced by Wishlist,
-// Alert, and PriceHistory.
+// adapter (scraper OR official API) resolves to. Referenced by Wishlist
+// and Alert. lowestPrice/highestPrice (below) are the only price-extreme
+// data this app keeps - there is no separate per-observation history log.
 
 'use strict';
 

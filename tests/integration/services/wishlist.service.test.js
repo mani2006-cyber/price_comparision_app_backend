@@ -12,7 +12,6 @@ const config = require('../../../src/config/env');
 const User = require('../../../src/models/User.model');
 const Product = require('../../../src/models/Product.model');
 const Wishlist = require('../../../src/models/Wishlist.model');
-const PriceHistory = require('../../../src/models/PriceHistory.model');
 const wishlistService = require('../../../src/services/wishlist.service');
 
 const EMAIL_A = 'svctest-wishlist-a@example.com';
@@ -48,7 +47,6 @@ beforeEach(async function() {
     });
 
     await Wishlist.deleteMany({ userId: { $in: [userA._id, userB._id] } });
-    await PriceHistory.deleteMany({ productId: product._id });
 });
 
 describe('addToWishlist', function() {
@@ -73,29 +71,27 @@ describe('addToWishlist', function() {
     });
 });
 
-describe('getWishlistWithPriceHistory', function() {
-    it('returns the wishlist with populated product data and recent price history attached', async function() {
+describe('getWishlist', function() {
+    it('returns the wishlist with product data populated live', async function() {
         await wishlistService.addToWishlist(userA._id, product._id);
-        await PriceHistory.create({ productId: product._id, price: 16000, recordedAt: new Date(Date.now() - 10 * 86400000) });
-        await PriceHistory.create({ productId: product._id, price: 15000, recordedAt: new Date() });
 
-        const withHistory = await wishlistService.getWishlistWithPriceHistory(userA._id);
+        const items = await wishlistService.getWishlist(userA._id);
 
-        expect(withHistory).toHaveLength(1);
-        expect(withHistory[0].item.productId.title).toBe('Wishlist Service Test Product');
-        expect(withHistory[0].priceHistory).toHaveLength(2);
+        expect(items).toHaveLength(1);
+        expect(items[0].productId.title).toBe('Wishlist Service Test Product');
+    });
+
+    it('reflects the product\'s CURRENT data, not a snapshot from when it was added', async function() {
+        await wishlistService.addToWishlist(userA._id, product._id);
+        await Product.updateOne({ _id: product._id }, { currentPrice: 12000 });
+
+        const items = await wishlistService.getWishlist(userA._id);
+
+        expect(items[0].productId.currentPrice).toBe(12000);
     });
 });
 
 describe('ownership enforcement', function() {
-    it('getItemPriceHistory rejects a different user with a 404', async function() {
-        const item = await wishlistService.addToWishlist(userA._id, product._id);
-
-        await expect(wishlistService.getItemPriceHistory(item._id, userB._id)).rejects.toMatchObject({
-            statusCode: 404,
-        });
-    });
-
     it('removeFromWishlist rejects a different user with a 404, leaves the item intact', async function() {
         const item = await wishlistService.addToWishlist(userA._id, product._id);
 
@@ -103,7 +99,7 @@ describe('ownership enforcement', function() {
             statusCode: 404,
         });
 
-        const stillThere = await wishlistService.getWishlistWithPriceHistory(userA._id);
+        const stillThere = await wishlistService.getWishlist(userA._id);
         expect(stillThere).toHaveLength(1);
     });
 
@@ -112,7 +108,7 @@ describe('ownership enforcement', function() {
 
         await wishlistService.removeFromWishlist(item._id, userA._id);
 
-        const afterRemoval = await wishlistService.getWishlistWithPriceHistory(userA._id);
+        const afterRemoval = await wishlistService.getWishlist(userA._id);
         expect(afterRemoval).toHaveLength(0);
     });
 });

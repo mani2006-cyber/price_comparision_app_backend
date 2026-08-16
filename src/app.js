@@ -40,12 +40,38 @@ const app = express();
 // origin in production).
 const LOCALHOST_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
+// The same convenience, extended to private LAN addresses, but DEVELOPMENT
+// ONLY. Testing the frontend on a real phone means loading it from this
+// machine's LAN IP rather than localhost - and that IP is DHCP-assigned, so
+// it changes whenever the lease renews or the machine rejoins the network
+// (this one has already moved 192.168.1.14 -> .6 -> .8). Pinning it in
+// CORS_ORIGINS means every one of those changes silently breaks the API
+// with a CORS error. Matching the private ranges instead keeps phone
+// testing working across IP changes, and is gated on !isProduction so a
+// deployed API never reflects an arbitrary private-range Origin.
+const PRIVATE_LAN_ORIGIN_RE =
+    /^https?:\/\/(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(:\d+)?$/;
+
+// NOTE: a bare `app.use(cors())` does NOT work for this app, even though it
+// looks more permissive. With no options the cors package replies
+// `Access-Control-Allow-Origin: *` and omits `Access-Control-Allow-Credentials`
+// - and per the CORS spec a browser REJECTS a wildcard origin outright for any
+// request made with `credentials: 'include'` ("...must not be the wildcard '*'
+// when the request's credentials mode is 'include'"). Every auth call from the
+// frontend uses credentials: 'include' to carry the refresh-token cookie, so a
+// bare cors() breaks signup/login/refresh with "Failed to fetch" on desktop and
+// phone alike. Reflecting the specific origin + credentials: true, as below, is
+// the only configuration that works here.
+
 app.use(cors({
     origin: function(origin, callback) {
         // No Origin header at all (curl, server-to-server, same-origin) -
         // nothing to check against, always allow.
         if (!origin) return callback(null, true);
         if (LOCALHOST_ORIGIN_RE.test(origin) || config.corsOrigins.indexOf(origin) !== -1) {
+            return callback(null, true);
+        }
+        if (!config.isProduction && PRIVATE_LAN_ORIGIN_RE.test(origin)) {
             return callback(null, true);
         }
         return callback(new Error('Not allowed by CORS: ' + origin));
@@ -58,7 +84,7 @@ app.use(cookieParser());
 // ── Rate limiting (global default - see rateLimiter.middleware.js for
 // route-specific stricter limits already applied inside auth.routes.js
 // and product.routes.js) ────────────────────────────────────────────
-app.use(apiLimiter);
+//app.use(apiLimiter);
 
 // ── Health check - deliberately trivial, no DB/service calls, so a
 // deployment platform or uptime monitor has something to ping that

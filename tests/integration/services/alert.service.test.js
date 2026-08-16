@@ -123,3 +123,27 @@ describe('cancelAlert - ownership enforcement', function() {
         expect(cancelled.status).toBe('cancelled');
     });
 });
+
+describe('deleteAlert - ownership enforcement', function() {
+    it('rejects deletion by a different user with a 404', async function() {
+        const alert = await alertService.createAlert(userA._id, product._id, 45000);
+
+        await expect(alertService.deleteAlert(alert._id, userB._id)).rejects.toMatchObject({ statusCode: 404 });
+
+        expect(await Alert.findById(alert._id)).not.toBeNull();
+    });
+
+    it('succeeds for the actual owner', async function() {
+        const alert = await alertService.createAlert(userA._id, product._id, 45000);
+
+        await alertService.deleteAlert(alert._id, userA._id);
+
+        expect(await Alert.findById(alert._id)).toBeNull();
+    });
+
+    it('rejects deleting a nonexistent alert with a 404', async function() {
+        await expect(alertService.deleteAlert('000000000000000000000000', userA._id)).rejects.toMatchObject({
+            statusCode: 404,
+        });
+    });
+});

@@ -9,10 +9,27 @@
 
 const adapters = require('../adapters');
 const productRepository = require('../repositories/product.repository');
+const cache = require('../utils/cache');
+const config = require('../config/env');
 const ApiError = require('../utils/ApiError');
 const logger = require('../utils/logger');
 
 const UPSERT_CHUNK_SIZE = 5;
+
+// Cache key is the normalized QUERY ONLY - deliberately ignores
+// options.sortBy/platform. sortBy never reaches adapters.searchAllMarketplaces
+// at all (search.service.js's runSearch sorts the array searchAndPersist
+// already returned, entirely after this function is done); platform is
+// accepted and recorded to search history but does not currently filter
+// which marketplaces get searched (see adapters/index.js's
+// searchAllMarketplaces - it always searches every active marketplace).
+// Both are therefore invariant to the actual work this function caches.
+// If platform-based filtering is ever implemented, THIS key must be
+// updated to include it, or two different platform filters would
+// silently share one cache entry and serve each other's results.
+function searchCacheKey(query) {
+    return 'search:' + String(query).trim().toLowerCase();
+}
 
 // Splits an array into fixed-size chunks - used to upsert search results
 // in controlled batches rather than firing all of them simultaneously.
@@ -41,8 +58,12 @@ async function upsertSafely(providerProduct) {
     }
 }
 
-// ── Search + persist ─────────────────────────────────────────────────
-async function searchAndPersist(query, options) {
+// Does the actual work: live marketplace search, then persist every
+// result. This is the expensive part (real HTTP calls out to every
+// marketplace, plus a MongoDB upsert per result) - searchAndPersist
+// below wraps it in a cache-aside, this function itself knows nothing
+// about caching.
+async function fetchAndPersist(query, options) {
     const { results, failures } = await adapters.searchAllMarketplaces(query, options);
 
     const batches = chunk(results, UPSERT_CHUNK_SIZE);
@@ -55,14 +76,42 @@ async function searchAndPersist(query, options) {
         });
     }
 
-    logger.info('Search and persist completed', {
-        query,
-        rawResultCount: results.length,
-        persistedCount: persisted.length,
-        marketplaceFailures: failures,
+    return { products: persisted, marketplaceFailures: failures };
+}
+
+// ── Search + persist (cached) ────────────────────────────────────────
+//
+// Cached by query alone (see searchCacheKey's own comment), shared
+// across EVERY caller regardless of who's asking - a guest and a
+// logged-in user searching "iphone 16" get the exact same underlying
+// fetch, and compare.service.js's own call here (searching by a
+// product's title, to find cross-marketplace matches) benefits from the
+// same shared cache too.
+//
+// Deliberately NOT gated on auth/userId, unlike the HTTP-level cache
+// this replaced (product.routes.js's old searchCache middleware): that
+// design skipped caching ENTIRELY for authenticated requests, because a
+// cache HIT at the HTTP layer short-circuited before the controller
+// ever ran - and the controller is what records search history. Caching
+// HERE instead, one layer down, means every call still returns through
+// runSearch() -> the controller -> history gets recorded every time,
+// regardless of whether the underlying data came from cache or a fresh
+// fetch. Only the expensive part is ever skipped, never the side effect.
+async function searchAndPersist(query, options) {
+    const key = searchCacheKey(query);
+
+    const { value, fromCache } = await cache.getOrSet(key, config.cacheTtl.search, function() {
+        return fetchAndPersist(query, options);
     });
 
-    return { products: persisted, marketplaceFailures: failures };
+    logger.info('Search and persist completed', {
+        query,
+        persistedCount: value.products.length,
+        marketplaceFailures: value.marketplaceFailures,
+        fromCache,
+    });
+
+    return value;
 }
 
 // ── Single product lookup ───────────────────────────────────────────

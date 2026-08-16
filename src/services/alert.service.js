@@ -109,9 +109,18 @@ async function checkAndTriggerAlerts(productId, currentPrice, productTitle) {
     return triggeredAlerts;
 }
 
+// ── Delete ───────────────────────────────────────────────────────────
+async function deleteAlert(alertId, userId) {
+    const result = await alertRepository.removeByIdForUser(alertId, userId);
+    if (result.deletedCount === 0) {
+        throw ApiError.notFound('Alert not found');
+    }
+}
+
 module.exports = {
     createAlert,
     getUserAlerts,
     cancelAlert,
+    deleteAlert,
     checkAndTriggerAlerts,
 };
