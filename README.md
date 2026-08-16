@@ -237,6 +237,8 @@ That split exists on purpose. Search used to be HTTP-level-cached too (guest-onl
 
 Caching is entirely optional infrastructure either way: with `REDIS_ENABLED=false`, every cache read is a no-op miss and every write silently does nothing — the app behaves identically, just without the speedup.
 
+Both layers also de-duplicate **concurrent** requests for the same key ("in-flight coalescing" / singleflight) — confirmed live: two near-simultaneous identical requests (e.g. a double-fired `compare-url` call) used to both miss the cache, since neither had finished writing yet, and both ran the full expensive pipeline independently — doubling live marketplace request volume and, for `compare-url`, doubling the OpenRouter AI call. Now a second request for a key that's already being computed just awaits that same in-progress computation instead of starting its own. This is an in-process `Map`, not Redis-backed, so it works even with caching itself disabled, and coalesces within a single server process only (the relevant scope for this app's current single-instance deployment).
+
 The notifications inbox cache is additionally **actively invalidated** on every write (a new notification, marking one/all read) rather than relying on its TTL alone — see `notification.repository.js`.
 
 ## Background jobs

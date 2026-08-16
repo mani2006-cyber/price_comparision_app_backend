@@ -93,13 +93,26 @@ function categorySortStage(sortBy) {
 // with a count of how many - the natural data source for a "browse by
 // category" landing page. Alphabetical, not by count, so the list
 // doesn't reshuffle every time the catalog changes.
+// The collation here is NOT optional styling - it has to match the one
+// findByCategory/countByCategory use below, or the two disagree. Without
+// it $group is case-SENSITIVE while the detail query is case-INSENSITIVE,
+// so a catalog holding both "Headphones" and "headphones" lists them as
+// two separate rows of 1 each, and then clicking either returns 2 - the
+// count shown never matches the page it opens. Collating the aggregate
+// folds those into one row whose count is what the detail view actually
+// returns. It also makes $sort alphabetical case-insensitively, instead
+// of binary order putting every capitalised name ahead of lowercase ones.
+//
+// $nin (not $ne) because a scraper that yields an empty category string
+// stores "" - which is not null, so $ne: null would surface a nameless
+// row in the browse list that links nowhere useful.
 async function findDistinctCategories() {
     return Product.aggregate([
-        { $match: { category: { $ne: null } } },
+        { $match: { category: { $nin: [null, ''] } } },
         { $group: { _id: '$category', count: { $sum: 1 } } },
         { $sort: { _id: 1 } },
         { $project: { _id: 0, category: '$_id', count: 1 } },
-    ]);
+    ]).collation(CATEGORY_COLLATION);
 }
 
 async function findByCategory(category, options) {

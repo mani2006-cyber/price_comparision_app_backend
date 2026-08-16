@@ -15,6 +15,7 @@ const mongoose = require('mongoose');
 const config = require('../../../src/config/env');
 const adapters = require('../../../src/adapters');
 const cache = require('../../../src/utils/cache');
+const productRepository = require('../../../src/repositories/product.repository');
 const app = require('../../../src/app');
 
 function fakeProduct() {
@@ -96,6 +97,53 @@ describe('GET /api/products/:id caching', function() {
         expect(res.headers['x-cache']).toBe('MISS');
         expect(cache.get).toHaveBeenCalledWith(expect.stringContaining(product._id.toString()));
 
+        await Product.deleteOne({ _id: product._id });
+    });
+});
+
+// Confirmed live: two near-simultaneous requests for the exact same
+// compare-url both missed the cache (neither had finished writing yet)
+// and both ran the full expensive pipeline independently. This
+// reproduces the same race deliberately - findById is made artificially
+// slow so the second concurrent request definitely arrives while the
+// first is still in flight, then proves it got coalesced instead of
+// triggering its own second DB query.
+describe('GET /api/products/:id - concurrent request coalescing', function() {
+    it('runs the underlying lookup only ONCE for two concurrent requests, and both get the same response', async function() {
+        cache.get.mockResolvedValue(null); // force a miss on both
+
+        const Product = require('../../../src/models/Product.model');
+        await Product.deleteOne({ marketplace: 'amazon', externalId: 'CACHEMWTEST1' });
+        const product = await Product.create(fakeProduct());
+
+        const findByIdSpy = jest.spyOn(productRepository, 'findById');
+        findByIdSpy.mockImplementationOnce(function(id) {
+            // Real lookup, just artificially delayed - not a fake value -
+            // so the second concurrent request below is guaranteed to
+            // arrive while this one is still in flight.
+            return new Promise(function(resolve) {
+                setTimeout(function() {
+                    mongoose.model('Product').findById(id).then(resolve);
+                }, 150);
+            });
+        });
+
+        const req1 = request(app).get('/api/products/' + product._id);
+        // Fired shortly after, while the first is still artificially
+        // delayed inside findById above - reproduces the live timing
+        // (49ms apart) that caused the original bug.
+        await new Promise(function(resolve) { setTimeout(resolve, 20); });
+        const req2 = request(app).get('/api/products/' + product._id);
+
+        const [res1, res2] = await Promise.all([req1, req2]);
+
+        expect(res1.status).toBe(200);
+        expect(res2.status).toBe(200);
+        expect(res1.body.product._id).toBe(product._id.toString());
+        expect(res2.body.product._id).toBe(product._id.toString());
+        expect(findByIdSpy).toHaveBeenCalledTimes(1); // NOT 2 - the second request was coalesced
+
+        findByIdSpy.mockRestore();
         await Product.deleteOne({ _id: product._id });
     });
 });
