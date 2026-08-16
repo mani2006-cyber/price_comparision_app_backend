@@ -67,6 +67,86 @@ describe('searchByQuery', function() {
         expect(unbxdUrl).toContain('q=iphone%2016');
     });
 
+    // Real gap found live: search results never carried a category at
+    // all, even though Unbxd's own response already has one for free
+    // (l1..l4, each one level deeper) - confirmed against a real live
+    // response, 0/314 Vijay Sales products in the DB had a category
+    // before this fix.
+    it('extracts category as the deepest available l1..l4 level, and categoryPath as the full breadcrumb', async function() {
+        axios.get
+            .mockResolvedValueOnce({ data: credentialsHtml('KEY123', 'SITE456') })
+            .mockResolvedValueOnce({
+                data: {
+                    response: {
+                        products: [
+                            {
+                                sku: '248948',
+                                title: 'ZEBRONICS Sono Plus Bluetooth Party Speaker',
+                                productUrl: 'https://www.vijaysales.com/p/P248948/248948/zebronics-sono-plus',
+                                price: 4999,
+                                l1: 'Electronics',
+                                l2: 'Television and Entertainment',
+                                l3: 'Large Audio',
+                                l4: 'Party Speakers',
+                            },
+                        ],
+                    },
+                },
+            });
+
+        const results = await vijaysales.searchByQuery('bluetooth speaker');
+
+        expect(results[0].category).toBe('Party Speakers');
+        expect(results[0].categoryPath).toEqual([
+            'Electronics', 'Television and Entertainment', 'Large Audio', 'Party Speakers',
+        ]);
+    });
+
+    it('falls back to the shallowest available level when deeper ones are missing', async function() {
+        axios.get
+            .mockResolvedValueOnce({ data: credentialsHtml('KEY123', 'SITE456') })
+            .mockResolvedValueOnce({
+                data: {
+                    response: {
+                        products: [
+                            {
+                                sku: 'X2',
+                                title: 'Some product',
+                                productUrl: 'https://www.vijaysales.com/p/x/X2/some-product',
+                                price: 500,
+                                l1: 'Electronics',
+                                // l2/l3/l4 absent
+                            },
+                        ],
+                    },
+                },
+            });
+
+        const results = await vijaysales.searchByQuery('x');
+
+        expect(results[0].category).toBe('Electronics');
+        expect(results[0].categoryPath).toEqual(['Electronics']);
+    });
+
+    it('reports category null when Unbxd gives no category levels at all', async function() {
+        axios.get
+            .mockResolvedValueOnce({ data: credentialsHtml('KEY123', 'SITE456') })
+            .mockResolvedValueOnce({
+                data: {
+                    response: {
+                        products: [
+                            { sku: 'X3', title: 'No category product', productUrl: 'https://www.vijaysales.com/p/x/X3/no-category', price: 500 },
+                        ],
+                    },
+                },
+            });
+
+        const results = await vijaysales.searchByQuery('x');
+
+        expect(results[0].category).toBeNull();
+        expect(results[0].categoryPath).toEqual([]);
+    });
+
     it('does not report an mrp that is not actually greater than price', async function() {
         axios.get
             .mockResolvedValueOnce({ data: credentialsHtml('KEY123', 'SITE456') })

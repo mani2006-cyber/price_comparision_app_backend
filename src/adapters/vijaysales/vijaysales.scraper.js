@@ -208,6 +208,23 @@ async function fetchUnbxdCredentials() {
     return { apiKey, siteKey };
 }
 
+// Real gap found live: search results never carried a category at all,
+// even though Unbxd's own response already has one - l1..l4 are plain
+// strings, each one level deeper ("Electronics" -> "Television and
+// Entertainment" -> "Large Audio" -> "Party Speakers"), confirmed
+// against a real live response. Reading it here is free (no extra
+// request - unlike Poorvika, whose search cards carry no category
+// signal at all, or Amazon's /search endpoint, which just doesn't
+// return one - both would need an extra per-result page fetch to get
+// one, which isn't worth the added request volume/block risk for this
+// site, where the data's already sitting in the response being parsed).
+function categoryFromUnbxdProduct(p) {
+    const path = [p.l1, p.l2, p.l3, p.l4].filter(function(level) {
+        return typeof level === 'string' && level.trim().length > 0;
+    });
+    return { category: path.length > 0 ? path[path.length - 1] : null, categoryPath: path };
+}
+
 function parseUnbxdResults(json) {
     const products = (json && json.response && json.response.products) || [];
     const results = [];
@@ -215,11 +232,15 @@ function parseUnbxdResults(json) {
     products.forEach(function(p) {
         if (!p.sku || !p.title || !p.productUrl || typeof p.price !== 'number') return;
 
+        const category = categoryFromUnbxdProduct(p);
+
         results.push(
             withDefaults({
                 marketplace: 'vijaysales',
                 externalId: String(p.sku),
                 title: cleanText(p.title),
+                category: category.category,
+                categoryPath: category.categoryPath,
                 images: p.thumbnailImage ? [p.thumbnailImage] : [],
                 currentPrice: p.price,
                 originalPrice: typeof p.mrp === 'number' && p.mrp > p.price ? p.mrp : null,
