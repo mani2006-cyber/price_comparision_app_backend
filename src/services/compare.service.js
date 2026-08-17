@@ -13,7 +13,7 @@ const config = require('../config/env');
 const ApiError = require('../utils/ApiError');
 const adapters = require('../adapters');
 const productService = require('./product.service');
-const { rankByCombinedMatch } = require('../utils/similarity');
+const { rankByCombinedMatch, rankBySimilarity } = require('../utils/similarity');
 const aiComparisonService = require('./aiComparison.service');
 const logger = require('../utils/logger');
 
@@ -95,7 +95,28 @@ async function compareByUrl(url) {
 
     allResults.sort(function(a, b) { return a.currentPrice - b.currentPrice; });
 
-    // ── 6. Optional AI-generated summary (never blocks/fails the request -
+    // ── 6. Similar products - related items, ANY marketplace including
+    // the same one as the original (unlike results[] above, which is
+    // deliberately cross-marketplace-only). "Similar" here means title
+    // similarity alone, no price gate and no spec-match requirement - a
+    // different color/storage variant, or a related accessory, is a
+    // perfectly good browsing suggestion even though it would be a BAD
+    // price-comparison match (which is exactly why results[] excludes
+    // it). Never a price claim, so it's kept entirely separate from
+    // results[] rather than merged into it.
+    const usedIds = {};
+    allResults.forEach(function(r) { usedIds[String(r._id)] = true; });
+    const similarCandidates = searchResult.products.filter(function(p) {
+        return !usedIds[String(p._id)];
+    });
+    const similarProducts = rankBySimilarity(originalProduct.title, similarCandidates)
+        .filter(function(p) { return p.similarityScore >= config.compare.minTitleSimilarity; })
+        .slice(0, config.compare.maxSimilarProducts)
+        .map(function(p) {
+            return Object.assign({}, p, { similarityScore: Math.round(p.similarityScore * 100) / 100 });
+        });
+
+    // ── 7. Optional AI-generated summary (never blocks/fails the request -
     // see aiComparison.service.js's own comment; null when no API key is
     // configured, no genuine matches were found, or the call fails). ──────
     const aiSummary = await aiComparisonService.generateComparisonSummary(originalProduct, goodMatches);
@@ -105,6 +126,7 @@ async function compareByUrl(url) {
         marketplace,
         candidateCount: candidates.length,
         matchesFound: goodMatches.length,
+        similarProductsFound: similarProducts.length,
         aiSummaryGenerated: !!aiSummary,
     });
 
@@ -113,6 +135,7 @@ async function compareByUrl(url) {
         detectedMarketplace: marketplace,
         matchesFound: goodMatches.length,
         results: allResults,
+        similarProducts: similarProducts,
         marketplaceFailures: searchResult.marketplaceFailures,
         aiSummary: aiSummary,
     };

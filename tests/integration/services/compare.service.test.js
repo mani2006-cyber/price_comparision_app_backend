@@ -172,6 +172,94 @@ describe('compareByUrl', function() {
         expect(flipkartMatches).toHaveLength(1); // not 3
     });
 
+    describe('similarProducts', function() {
+        it('surfaces a same-marketplace variant here instead of discarding it - the iPhone 17e case, but as a suggestion not a price match', async function() {
+            adapters.detectMarketplaceFromUrl.mockReturnValue('amazon');
+            adapters.searchByLink.mockResolvedValue(fakeProduct());
+            adapters.searchAllMarketplaces.mockResolvedValue({
+                results: [
+                    fakeProduct(),
+                    fakeProduct({ externalId: 'CMPTEST_SIBLING', title: 'Apple iPhone 17e 256 GB Black', currentPrice: 82490 }),
+                ],
+                failures: [],
+            });
+
+            const result = await compareService.compareByUrl('https://www.amazon.in/dp/CMPTEST_ORIG');
+
+            expect(result.matchesFound).toBe(0); // still not a price-comparison match
+            expect(result.similarProducts).toHaveLength(1); // but not thrown away either
+            expect(result.similarProducts[0].externalId).toBe('CMPTEST_SIBLING');
+            expect(result.similarProducts[0].isOriginal).toBeUndefined(); // not tagged like results[] entries
+        });
+
+        it('does NOT duplicate a product that is already in results[] as a genuine match', async function() {
+            adapters.detectMarketplaceFromUrl.mockReturnValue('amazon');
+            adapters.searchByLink.mockResolvedValue(fakeProduct());
+            adapters.searchAllMarketplaces.mockResolvedValue({
+                results: [
+                    fakeProduct(),
+                    fakeProduct({ marketplace: 'flipkart', externalId: 'CMPTEST_MATCH', title: 'Apple iPhone 16 128 GB Black', currentPrice: 67900 }),
+                ],
+                failures: [],
+            });
+
+            const result = await compareService.compareByUrl('https://www.amazon.in/dp/CMPTEST_ORIG');
+
+            expect(result.matchesFound).toBe(1);
+            const matchIds = result.results.map(function(r) { return r.externalId; });
+            const similarIds = result.similarProducts.map(function(r) { return r.externalId; });
+            expect(similarIds.some(function(id) { return matchIds.indexOf(id) !== -1; })).toBe(false);
+        });
+
+        it('still excludes a genuinely unrelated product sharing only a generic word - not every leftover becomes "similar"', async function() {
+            adapters.detectMarketplaceFromUrl.mockReturnValue('amazon');
+            adapters.searchByLink.mockResolvedValue(fakeProduct());
+            adapters.searchAllMarketplaces.mockResolvedValue({
+                results: [
+                    fakeProduct(),
+                    fakeProduct({
+                        marketplace: 'myntra',
+                        externalId: 'CMPTEST_UNRELATED',
+                        title: 'FUJIFILM Instax Mini Instant Camera',
+                        currentPrice: 37498,
+                    }),
+                ],
+                failures: [],
+            });
+
+            const result = await compareService.compareByUrl('https://www.amazon.in/dp/CMPTEST_ORIG');
+
+            expect(result.similarProducts).toHaveLength(0);
+        });
+
+        it('respects config.compare.maxSimilarProducts as a cap', async function() {
+            adapters.detectMarketplaceFromUrl.mockReturnValue('amazon');
+            adapters.searchByLink.mockResolvedValue(fakeProduct());
+            const manyVariants = [];
+            for (let i = 0; i < config.compare.maxSimilarProducts + 5; i++) {
+                manyVariants.push(fakeProduct({ externalId: 'CMPTEST_VAR' + i, title: 'Apple iPhone 16e 128 GB Variant ' + i, currentPrice: 59900 + i }));
+            }
+            adapters.searchAllMarketplaces.mockResolvedValue({
+                results: [fakeProduct()].concat(manyVariants),
+                failures: [],
+            });
+
+            const result = await compareService.compareByUrl('https://www.amazon.in/dp/CMPTEST_ORIG');
+
+            expect(result.similarProducts.length).toBeLessThanOrEqual(config.compare.maxSimilarProducts);
+        });
+
+        it('is empty (not missing/undefined) when there is nothing similar to suggest', async function() {
+            adapters.detectMarketplaceFromUrl.mockReturnValue('amazon');
+            adapters.searchByLink.mockResolvedValue(fakeProduct());
+            adapters.searchAllMarketplaces.mockResolvedValue({ results: [fakeProduct()], failures: [] });
+
+            const result = await compareService.compareByUrl('https://www.amazon.in/dp/CMPTEST_ORIG');
+
+            expect(result.similarProducts).toEqual([]);
+        });
+    });
+
     describe('aiSummary', function() {
         it('surfaces the AI service\'s summary on the result, called with the original + the actual good matches', async function() {
             adapters.detectMarketplaceFromUrl.mockReturnValue('amazon');

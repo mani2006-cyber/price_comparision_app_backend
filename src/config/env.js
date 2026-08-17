@@ -148,6 +148,13 @@ const config = {
     compare: {
         similarityThreshold: getNumber('SIMILARITY_THRESHOLD', 0.2),
         maxCrossMatches: getNumber('MAX_CROSS_MATCHES', 5),
+        // POST /compare-url's result.similarProducts - related items (any
+        // marketplace, including the same one as the original) ranked by
+        // title similarity alone, no price gate. Deliberately separate
+        // from maxCrossMatches above: results[] is a strict price
+        // COMPARISON (cross-marketplace only, price-gated), similarProducts
+        // is "you might also be interested in" browsing, not a price claim.
+        maxSimilarProducts: getNumber('MAX_SIMILAR_PRODUCTS', 6),
         // How far apart two prices can be and still plausibly be the same
         // real product across marketplaces (src/utils/similarity.js's
         // passesPriceGate) - were bare module-level consts there.
