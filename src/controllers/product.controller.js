@@ -55,7 +55,11 @@ async function getProductDetail(req, res) {
 // ── Compare by URL ──────────────────────────────────────────────────
 async function compareUrl(req, res) {
     const url = req.body.url;
-    const result = await compareService.compareByUrl(url);
+    const options = {
+        page: req.query.page,
+        limit: req.query.limit,
+    };
+    const result = await compareService.compareByUrl(url, options);
     res.status(200).json({ success: true, result });
 }
 

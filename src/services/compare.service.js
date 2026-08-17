@@ -6,10 +6,23 @@
 // is a persisted Product document, since this reuses product.service.js's
 // existing search+persist and refresh paths rather than working with raw
 // adapter output.
+//
+// Caching lives HERE, not at the HTTP layer (product.routes.js no longer
+// has a compareCache middleware) - same move product.service.js's
+// searchAndPersist already made, for the same reason: result.similarProducts
+// is now PAGINATED (page/limit), and an HTTP-level whole-response cache
+// keyed on the URL alone would freeze whichever page got requested FIRST
+// and serve that exact page to every caller for the rest of the TTL,
+// regardless of what page they actually asked for. Splitting into
+// computeComparison() (the expensive part - live search, matching, the
+// AI summary call - cached by URL alone) and compareByUrl() (always
+// runs, paginates similarProducts fresh on every call, cache hit or not)
+// keeps the expensive work shared while pagination stays correct.
 
 'use strict';
 
 const config = require('../config/env');
+const cache = require('../utils/cache');
 const ApiError = require('../utils/ApiError');
 const adapters = require('../adapters');
 const productService = require('./product.service');
@@ -17,30 +30,19 @@ const { rankByCombinedMatch, rankBySimilarity } = require('../utils/similarity')
 const aiComparisonService = require('./aiComparison.service');
 const logger = require('../utils/logger');
 
-async function compareByUrl(url) {
-    if (!url || typeof url !== 'string') {
-        throw ApiError.badRequest("A product 'url' is required");
-    }
+const DEFAULT_PAGE = 1;
 
-    const marketplace = adapters.detectMarketplaceFromUrl(url);
-    if (!marketplace) {
-        // Build the active-marketplaces list defensively - if this call
-        // itself ever fails or returns something unexpected, the user
-        // should still get a clean 400, not a TypeError while we were
-        // constructing the ERROR message for a different problem.
-        let activeList = 'amazon, flipkart, myntra, lenskart, nykaa, poorvika, vijaysales';
-        try {
-            const active = adapters.getActiveMarketplaces();
-            if (Array.isArray(active) && active.length > 0) {
-                activeList = active.join(', ');
-            }
-        } catch (err) {
-            // Fall through to the hardcoded default above.
-        }
+function compareCacheKey(url) {
+    return 'compare:' + String(url).trim();
+}
 
-        throw ApiError.badRequest('URL not recognized. Supported marketplaces: ' + activeList);
-    }
-
+// The expensive part: live marketplace search, cross-marketplace
+// matching, the full similar-products pool, and the AI summary call.
+// Cached by URL alone - compareByUrl below paginates result.
+// similarProductsPool AFTER this returns (cached or fresh), so a cache
+// hit still gets correct, fresh-per-request pagination instead of
+// replaying whatever page happened to be requested first.
+async function computeComparison(url, marketplace) {
     // ── 1. Fetch + persist the ORIGINAL product ─────────────────────────
     // refreshProductByLink already upserts through product.repository.js,
     // which handles price-change detection and lowestPrice/highestPrice
@@ -76,7 +78,7 @@ async function compareByUrl(url) {
     });
 
     const goodMatches = Object.keys(bestPerMarketplace)
-        .map(function(marketplace) { return bestPerMarketplace[marketplace]; })
+        .map(function(mp) { return bestPerMarketplace[mp]; })
         .sort(function(a, b) { return b.similarityScore - a.similarityScore; })
         .slice(0, config.compare.maxCrossMatches);
 
@@ -95,21 +97,23 @@ async function compareByUrl(url) {
 
     allResults.sort(function(a, b) { return a.currentPrice - b.currentPrice; });
 
-    // ── 6. Similar products - related items, ANY marketplace including
-    // the same one as the original (unlike results[] above, which is
-    // deliberately cross-marketplace-only). "Similar" here means title
-    // similarity alone, no price gate and no spec-match requirement - a
-    // different color/storage variant, or a related accessory, is a
+    // ── 6. Similar products POOL - related items, ANY marketplace
+    // including the same one as the original (unlike results[] above,
+    // which is deliberately cross-marketplace-only). "Similar" here means
+    // title similarity alone, no price gate and no spec-match requirement -
+    // a different color/storage variant, or a related accessory, is a
     // perfectly good browsing suggestion even though it would be a BAD
     // price-comparison match (which is exactly why results[] excludes
     // it). Never a price claim, so it's kept entirely separate from
-    // results[] rather than merged into it.
+    // results[] rather than merged into it. This is the FULL pool (up to
+    // config.compare.maxSimilarProducts) - compareByUrl paginates it,
+    // this function just computes and caches it.
     const usedIds = {};
     allResults.forEach(function(r) { usedIds[String(r._id)] = true; });
     const similarCandidates = searchResult.products.filter(function(p) {
         return !usedIds[String(p._id)];
     });
-    const similarProducts = rankBySimilarity(originalProduct.title, similarCandidates)
+    const similarProductsPool = rankBySimilarity(originalProduct.title, similarCandidates)
         .filter(function(p) { return p.similarityScore >= config.compare.minTitleSimilarity; })
         .slice(0, config.compare.maxSimilarProducts)
         .map(function(p) {
@@ -121,23 +125,71 @@ async function compareByUrl(url) {
     // configured, no genuine matches were found, or the call fails). ──────
     const aiSummary = await aiComparisonService.generateComparisonSummary(originalProduct, goodMatches);
 
-    logger.info('Compare-url completed', {
+    logger.info('Compare-url computed', {
         url,
         marketplace,
         candidateCount: candidates.length,
         matchesFound: goodMatches.length,
-        similarProductsFound: similarProducts.length,
+        similarProductsPoolSize: similarProductsPool.length,
         aiSummaryGenerated: !!aiSummary,
     });
 
     return {
-        originalUrl: url,
-        detectedMarketplace: marketplace,
         matchesFound: goodMatches.length,
         results: allResults,
-        similarProducts: similarProducts,
+        similarProductsPool: similarProductsPool,
         marketplaceFailures: searchResult.marketplaceFailures,
         aiSummary: aiSummary,
+    };
+}
+
+async function compareByUrl(url, options) {
+    if (!url || typeof url !== 'string') {
+        throw ApiError.badRequest("A product 'url' is required");
+    }
+
+    const marketplace = adapters.detectMarketplaceFromUrl(url);
+    if (!marketplace) {
+        // Build the active-marketplaces list defensively - if this call
+        // itself ever fails or returns something unexpected, the user
+        // should still get a clean 400, not a TypeError while we were
+        // constructing the ERROR message for a different problem.
+        let activeList = 'amazon, flipkart, myntra, lenskart, nykaa, poorvika, vijaysales';
+        try {
+            const active = adapters.getActiveMarketplaces();
+            if (Array.isArray(active) && active.length > 0) {
+                activeList = active.join(', ');
+            }
+        } catch (err) {
+            // Fall through to the hardcoded default above.
+        }
+
+        throw ApiError.badRequest('URL not recognized. Supported marketplaces: ' + activeList);
+    }
+
+    const { value: computed } = await cache.getOrSet(compareCacheKey(url), config.cacheTtl.compare, function() {
+        return computeComparison(url, marketplace);
+    });
+
+    // Pagination over the already-computed (possibly cached) pool -
+    // always runs, cache hit or miss, so it's never stale.
+    const page = (options && options.page) || DEFAULT_PAGE;
+    const limit = (options && options.limit) || config.compare.similarProductsDefaultLimit;
+    const start = (page - 1) * limit;
+    const similarProducts = computed.similarProductsPool.slice(start, start + limit);
+
+    return {
+        originalUrl: url,
+        detectedMarketplace: marketplace,
+        matchesFound: computed.matchesFound,
+        results: computed.results,
+        similarProducts: similarProducts,
+        similarProductsPage: page,
+        similarProductsLimit: limit,
+        similarProductsTotal: computed.similarProductsPool.length,
+        similarProductsTotalPages: Math.ceil(computed.similarProductsPool.length / limit) || 0,
+        marketplaceFailures: computed.marketplaceFailures,
+        aiSummary: computed.aiSummary,
     };
 }
 

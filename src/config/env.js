@@ -154,7 +154,15 @@ const config = {
         // from maxCrossMatches above: results[] is a strict price
         // COMPARISON (cross-marketplace only, price-gated), similarProducts
         // is "you might also be interested in" browsing, not a price claim.
-        maxSimilarProducts: getNumber('MAX_SIMILAR_PRODUCTS', 6),
+        //
+        // maxSimilarProducts is the size of the POOL computed and cached
+        // per URL (see compare.service.js's computeComparison) - NOT the
+        // page size. similarProductsDefaultLimit/MaxLimit paginate over
+        // that already-computed pool, same "cache the expensive part once,
+        // paginate fresh per request" split as search.service.js's runSearch.
+        maxSimilarProducts: getNumber('MAX_SIMILAR_PRODUCTS', 30),
+        similarProductsDefaultLimit: getNumber('SIMILAR_PRODUCTS_DEFAULT_LIMIT', 6),
+        similarProductsMaxLimit: getNumber('SIMILAR_PRODUCTS_MAX_LIMIT', 20),
         // How far apart two prices can be and still plausibly be the same
         // real product across marketplaces (src/utils/similarity.js's
         // passesPriceGate) - were bare module-level consts there.

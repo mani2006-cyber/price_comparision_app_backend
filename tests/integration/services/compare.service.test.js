@@ -232,7 +232,7 @@ describe('compareByUrl', function() {
             expect(result.similarProducts).toHaveLength(0);
         });
 
-        it('respects config.compare.maxSimilarProducts as a cap', async function() {
+        it('respects config.compare.maxSimilarProducts as a cap on the underlying POOL (similarProductsTotal), not just the current page', async function() {
             adapters.detectMarketplaceFromUrl.mockReturnValue('amazon');
             adapters.searchByLink.mockResolvedValue(fakeProduct());
             const manyVariants = [];
@@ -246,7 +246,8 @@ describe('compareByUrl', function() {
 
             const result = await compareService.compareByUrl('https://www.amazon.in/dp/CMPTEST_ORIG');
 
-            expect(result.similarProducts.length).toBeLessThanOrEqual(config.compare.maxSimilarProducts);
+            expect(result.similarProductsTotal).toBe(config.compare.maxSimilarProducts); // the pool itself is capped
+            expect(result.similarProducts.length).toBeLessThanOrEqual(config.compare.similarProductsDefaultLimit); // this page is smaller still
         });
 
         it('is empty (not missing/undefined) when there is nothing similar to suggest', async function() {
@@ -257,6 +258,78 @@ describe('compareByUrl', function() {
             const result = await compareService.compareByUrl('https://www.amazon.in/dp/CMPTEST_ORIG');
 
             expect(result.similarProducts).toEqual([]);
+            expect(result.similarProductsTotal).toBe(0);
+            expect(result.similarProductsTotalPages).toBe(0);
+        });
+    });
+
+    describe('similarProducts pagination', function() {
+        function manyVariantResults() {
+            const variants = [];
+            for (let i = 0; i < 25; i++) {
+                variants.push(fakeProduct({ externalId: 'CMPTEST_VAR' + i, title: 'Apple iPhone 16e 128 GB Variant ' + i, currentPrice: 59900 + i }));
+            }
+            return [fakeProduct()].concat(variants);
+        }
+
+        it('defaults to page 1 with config.compare.similarProductsDefaultLimit results', async function() {
+            adapters.detectMarketplaceFromUrl.mockReturnValue('amazon');
+            adapters.searchByLink.mockResolvedValue(fakeProduct());
+            adapters.searchAllMarketplaces.mockResolvedValue({ results: manyVariantResults(), failures: [] });
+
+            const result = await compareService.compareByUrl('https://www.amazon.in/dp/CMPTEST_ORIG');
+
+            expect(result.similarProductsPage).toBe(1);
+            expect(result.similarProductsLimit).toBe(config.compare.similarProductsDefaultLimit);
+            expect(result.similarProducts).toHaveLength(config.compare.similarProductsDefaultLimit);
+            expect(result.similarProductsTotal).toBe(25);
+            expect(result.similarProductsTotalPages).toBe(Math.ceil(25 / config.compare.similarProductsDefaultLimit));
+        });
+
+        it('returns a disjoint slice for an explicit page/limit', async function() {
+            adapters.detectMarketplaceFromUrl.mockReturnValue('amazon');
+            adapters.searchByLink.mockResolvedValue(fakeProduct());
+            adapters.searchAllMarketplaces.mockResolvedValue({ results: manyVariantResults(), failures: [] });
+
+            const page1 = await compareService.compareByUrl('https://www.amazon.in/dp/CMPTEST_ORIG', { page: 1, limit: 10 });
+            const page2 = await compareService.compareByUrl('https://www.amazon.in/dp/CMPTEST_ORIG', { page: 2, limit: 10 });
+
+            expect(page1.similarProducts).toHaveLength(10);
+            expect(page2.similarProducts).toHaveLength(10);
+            const page1Ids = page1.similarProducts.map(function(p) { return p.externalId; });
+            const page2Ids = page2.similarProducts.map(function(p) { return p.externalId; });
+            expect(page1Ids).not.toEqual(expect.arrayContaining(page2Ids));
+        });
+
+        it('an out-of-range page returns an empty array, not an error', async function() {
+            adapters.detectMarketplaceFromUrl.mockReturnValue('amazon');
+            adapters.searchByLink.mockResolvedValue(fakeProduct());
+            adapters.searchAllMarketplaces.mockResolvedValue({ results: manyVariantResults(), failures: [] });
+
+            const result = await compareService.compareByUrl('https://www.amazon.in/dp/CMPTEST_ORIG', { page: 99, limit: 10 });
+
+            expect(result.similarProducts).toEqual([]);
+            expect(result.similarProductsTotal).toBe(25);
+        });
+
+        // The real point of moving caching down into the service (see
+        // compare.service.js's own header comment): a cache HIT must still
+        // paginate fresh per request, not replay whichever page was cached
+        // first. Two DIFFERENT pages for the SAME url, with the underlying
+        // expensive work (search) only actually running once.
+        it('a cached URL still returns the correct page on a second call with DIFFERENT pagination', async function() {
+            adapters.detectMarketplaceFromUrl.mockReturnValue('amazon');
+            adapters.searchByLink.mockResolvedValue(fakeProduct());
+            adapters.searchAllMarketplaces.mockResolvedValue({ results: manyVariantResults(), failures: [] });
+
+            const page1 = await compareService.compareByUrl('https://www.amazon.in/dp/CMPTEST_ORIG', { page: 1, limit: 5 });
+            const page3 = await compareService.compareByUrl('https://www.amazon.in/dp/CMPTEST_ORIG', { page: 3, limit: 5 });
+
+            expect(page1.similarProductsPage).toBe(1);
+            expect(page3.similarProductsPage).toBe(3);
+            const page1Ids = page1.similarProducts.map(function(p) { return p.externalId; });
+            const page3Ids = page3.similarProducts.map(function(p) { return p.externalId; });
+            expect(page1Ids).not.toEqual(expect.arrayContaining(page3Ids));
         });
     });
 

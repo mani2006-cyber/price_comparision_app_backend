@@ -279,4 +279,59 @@ describe('POST /api/compare-url', function() {
         expect(res.status).toBe(200);
         expect(res.body.result.detectedMarketplace).toBe('vijaysales');
     });
+
+    describe('similarProducts pagination', function() {
+        function manyVariantResults() {
+            const variants = [];
+            for (let i = 0; i < 15; i++) {
+                variants.push(fakeProduct({ externalId: 'ROUTETEST_VAR' + i, title: 'Route Test Laptop Variant ' + i, currentPrice: 45000 + i }));
+            }
+            return [fakeProduct()].concat(variants);
+        }
+
+        it('returns page 1 with default limit, plus pagination metadata, when unspecified', async function() {
+            adapters.detectMarketplaceFromUrl.mockReturnValue('amazon');
+            adapters.searchByLink.mockResolvedValue(fakeProduct());
+            adapters.searchAllMarketplaces.mockResolvedValue({ results: manyVariantResults(), failures: [] });
+
+            const res = await request(app).post('/api/compare-url').send({ url: 'https://www.amazon.in/dp/ROUTETEST1' });
+
+            expect(res.status).toBe(200);
+            expect(res.body.result.similarProductsPage).toBe(1);
+            expect(res.body.result.similarProductsLimit).toBe(config.compare.similarProductsDefaultLimit);
+            expect(res.body.result.similarProducts).toHaveLength(config.compare.similarProductsDefaultLimit);
+            expect(res.body.result.similarProductsTotal).toBe(15);
+        });
+
+        it('respects explicit page/limit query params on the POST request', async function() {
+            adapters.detectMarketplaceFromUrl.mockReturnValue('amazon');
+            adapters.searchByLink.mockResolvedValue(fakeProduct());
+            adapters.searchAllMarketplaces.mockResolvedValue({ results: manyVariantResults(), failures: [] });
+
+            const res = await request(app)
+                .post('/api/compare-url?page=2&limit=5')
+                .send({ url: 'https://www.amazon.in/dp/ROUTETEST1' });
+
+            expect(res.status).toBe(200);
+            expect(res.body.result.similarProducts).toHaveLength(5);
+            expect(res.body.result.similarProductsPage).toBe(2);
+            expect(res.body.result.similarProductsTotalPages).toBe(3);
+        });
+
+        it('rejects a limit above the configured cap with a 400', async function() {
+            const res = await request(app)
+                .post('/api/compare-url?limit=999')
+                .send({ url: 'https://www.amazon.in/dp/ROUTETEST1' });
+
+            expect(res.status).toBe(400);
+        });
+
+        it('rejects page=0 with a 400', async function() {
+            const res = await request(app)
+                .post('/api/compare-url?page=0')
+                .send({ url: 'https://www.amazon.in/dp/ROUTETEST1' });
+
+            expect(res.status).toBe(400);
+        });
+    });
 });

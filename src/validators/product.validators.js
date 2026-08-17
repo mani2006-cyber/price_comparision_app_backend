@@ -49,6 +49,14 @@ const compareUrlBodySchema = z.object({
         .url("A valid product 'url' is required"),
 });
 
+// POST /api/compare-url also accepts page/limit as QUERY params (the
+// body is reserved for `url`) to paginate result.similarProducts - same
+// coerce-from-string pattern as every other paginated query schema here.
+const compareUrlQuerySchema = z.object({
+    page: z.coerce.number("'page' must be a number").int().min(1).optional(),
+    limit: z.coerce.number("'limit' must be a number").int().min(1).max(config.compare.similarProductsMaxLimit).optional(),
+});
+
 // GET /api/categories/:category/products - page/limit arrive as query
 // strings, hence z.coerce.number() (same reasoning as alert.validators.js's
 // targetPrice) rather than z.number(). limit is capped (config.category.maxLimit)
@@ -63,5 +71,6 @@ module.exports = {
     SORT_BY_VALUES,
     searchQuerySchema,
     compareUrlBodySchema,
+    compareUrlQuerySchema,
     categoryProductsQuerySchema,
 };
