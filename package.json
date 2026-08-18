@@ -11,7 +11,8 @@
         "start": "node server.js",
         "dev": "node --watch server.js",
         "test": "cross-env NODE_ENV=test jest --runInBand",
-        "test:watch": "cross-env NODE_ENV=test jest --runInBand --watch"
+        "test:watch": "cross-env NODE_ENV=test jest --runInBand --watch",
+        "seed:catalog": "node scripts/seed-catalog.js"
     },
     "dependencies": {
         "@openrouter/sdk": "^1.2.37",
