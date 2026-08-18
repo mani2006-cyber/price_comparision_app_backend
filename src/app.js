@@ -21,6 +21,7 @@ const categoryRoutes = require('./routes/category.routes');
 const wishlistRoutes = require('./routes/wishlist.routes');
 const alertRoutes = require('./routes/alert.routes');
 const notificationRoutes = require('./routes/notification.routes');
+const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
 
@@ -108,6 +109,7 @@ app.use('/api/categories', categoryRoutes);
 app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/admin/products', adminRoutes);
 
 // ── 404 + error handling - MUST be last ─────────────────────────────
 app.use(notFoundHandler);

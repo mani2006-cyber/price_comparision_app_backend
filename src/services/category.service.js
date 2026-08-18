@@ -1,24 +1,32 @@
 // src/services/category.service.js
 //
-// Category browsing - lists the distinct categories present in the
-// already-persisted catalog, and paginates products within one. Unlike
-// search.service.js/product.service.js's searchAndPersist, this NEVER
-// hits a marketplace live - it's purely a read over what a prior
-// search/compare-url has already saved. See product.repository.js's
-// findByCategory/findDistinctCategories for why coverage is partial
-// (not every adapter extracts a category).
+// Category browsing - reads the admin-curated catalog (AdminProduct),
+// not scraped/persisted marketplace data (Product). This is the
+// read side; adminProduct.service.js is the write side, sitting behind
+// adminAuth.middleware.js's shared-secret gate rather than public routes.
+//
+// getProductListings is the "click a catalog product" flow: an
+// AdminProduct entry has no real marketplace listing behind it (see
+// AdminProduct.model.js's own comment), so clicking one triggers a real,
+// live multi-marketplace search keyed by its title - reusing
+// search.service.js's runSearch wholesale (same pagination/sorting/
+// persistence it already has for GET /search) rather than duplicating
+// that logic here. userId is deliberately never passed through, so a
+// catalog click never pollutes a user's search history - they didn't
+// type this query, they clicked a card.
 
 'use strict';
 
 const ApiError = require('../utils/ApiError');
-const productRepository = require('../repositories/product.repository');
+const adminProductRepository = require('../repositories/adminProduct.repository');
+const searchService = require('./search.service');
 const config = require('../config/env');
 
 const DEFAULT_PAGE = 1; // pagination always starts at 1 - not a tunable, unlike the limit below
 const DEFAULT_LIMIT = config.category.defaultLimit;
 
 async function listCategories() {
-    return productRepository.findDistinctCategories();
+    return adminProductRepository.findDistinctCategories();
 }
 
 async function getProductsByCategory(category, options) {
@@ -32,8 +40,8 @@ async function getProductsByCategory(category, options) {
     const sortBy = options && options.sortBy;
 
     const [products, total] = await Promise.all([
-        productRepository.findByCategory(trimmed, { page, limit, sortBy }),
-        productRepository.countByCategory(trimmed),
+        adminProductRepository.findByCategory(trimmed, { page, limit, sortBy }),
+        adminProductRepository.countByCategory(trimmed),
     ]);
 
     return {
@@ -46,4 +54,15 @@ async function getProductsByCategory(category, options) {
     };
 }
 
-module.exports = { listCategories, getProductsByCategory };
+async function getProductListings(id, options) {
+    const adminProduct = await adminProductRepository.findActiveById(id);
+    if (!adminProduct) {
+        throw ApiError.notFound('Catalog product not found');
+    }
+
+    const listings = await searchService.runSearch(adminProduct.title, null, options);
+
+    return { adminProduct, listings };
+}
+
+module.exports = { listCategories, getProductsByCategory, getProductListings };

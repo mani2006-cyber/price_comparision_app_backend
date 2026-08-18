@@ -68,92 +68,7 @@ async function searchByText(query, limit) {
         .limit(limit || 20);
 }
 
-// ── Category browsing ───────────────────────────────────────────────
-//
-// Browses the ALREADY-PERSISTED catalog (products a prior search or
-// compare-url already found and saved), never triggers a live
-// marketplace fetch the way /search does - a category listing is
-// "what do we already know about", not "go find more right now".
-// Coverage is necessarily partial: myntra/nykaa/lenskart/vijaysales/
-// poorvika all set one (see each adapter's own comment for how/why);
-// amazon and flipkart deliberately don't - amazon's only exists via a
-// separate metered RapidAPI endpoint (real quota cost to fetch per
-// search result), and flipkart's is embedded in a fragile, inconsistent
-// spot that isn't worth shipping. That's a deliberate tradeoff per
-// marketplace, not a bug to route around here - see README.md's
-// Categories section for the full breakdown.
-
-const CATEGORY_COLLATION = { locale: 'en', strength: 2 }; // case-insensitive exact match
-
-function categorySortStage(sortBy) {
-    if (sortBy === 'price_asc') return { currentPrice: 1 };
-    if (sortBy === 'price_desc') return { currentPrice: -1 };
-    if (sortBy === 'rating') return { 'rating.average': -1 };
-    return { lastCheckedAt: -1 }; // default: most recently seen first
-}
-
-// Distinct category names currently present on at least one product,
-// with a count of how many - the natural data source for a "browse by
-// category" landing page. Alphabetical, not by count, so the list
-// doesn't reshuffle every time the catalog changes.
-// The collation here is NOT optional styling - it has to match the one
-// findByCategory/countByCategory use below, or the two disagree. Without
-// it $group is case-SENSITIVE while the detail query is case-INSENSITIVE,
-// so a catalog holding both "Headphones" and "headphones" lists them as
-// two separate rows of 1 each, and then clicking either returns 2 - the
-// count shown never matches the page it opens. Collating the aggregate
-// folds those into one row whose count is what the detail view actually
-// returns. It also makes $sort alphabetical case-insensitively, instead
-// of binary order putting every capitalised name ahead of lowercase ones.
-//
-// $nin (not $ne) because a scraper that yields an empty category string
-// stores "" - which is not null, so $ne: null would surface a nameless
-// row in the browse list that links nowhere useful.
-async function findDistinctCategories() {
-    return Product.aggregate([
-        { $match: { category: { $nin: [null, ''] } } },
-        { $group: { _id: '$category', count: { $sum: 1 } } },
-        { $sort: { _id: 1 } },
-        { $project: { _id: 0, category: '$_id', count: 1 } },
-    ]).collation(CATEGORY_COLLATION);
-}
-
-async function findByCategory(category, options) {
-    const page = (options && options.page) || 1;
-    const limit = (options && options.limit) || 20;
-
-    return Product.find({ category })
-        .collation(CATEGORY_COLLATION)
-        .sort(categorySortStage(options && options.sortBy))
-        .skip((page - 1) * limit)
-        .limit(limit);
-}
-
-async function countByCategory(category) {
-    return Product.countDocuments({ category }).collation(CATEGORY_COLLATION);
-}
-
 // ── Writes ───────────────────────────────────────────────────────────
-
-// GET /api/categories caches its whole response under one fixed key (see
-// category.routes.js's keyBuilder, which returns the constant 'list'), so
-// unlike the per-query search caches this one CAN be invalidated precisely
-// - there's exactly one entry to drop.
-//
-// It has to be, too. The list is derived from whatever products happen to
-// be persisted, and every search persists more. Without this, a category
-// discovered by today's search stays invisible until the entry expires on
-// its own - which at CACHE_CATEGORY_TTL_SECONDS (3 days) means the browse
-// page can sit for days showing a strict subset of what's really in the
-// catalog, with no way for a user to tell.
-const CATEGORY_LIST_CACHE_KEY = 'categories:list';
-
-function invalidateCategoryListCache() {
-    // Fire-and-forget: cache.del already swallows its own errors and no-ops
-    // when Redis is off, and a failed invalidation must never fail the
-    // upsert that triggered it.
-    cache.del(CATEGORY_LIST_CACHE_KEY);
-}
 
 async function upsertFromProviderData(providerData, session) {
     const options = session ? { session } : {};
@@ -170,11 +85,6 @@ async function upsertFromProviderData(providerData, session) {
             [Object.assign({}, providerData, { lastCheckedAt: now, lastPriceChangedAt: now })],
             options
         );
-        // A brand-new product may be the first one in its category, which
-        // would make the cached list wrong by omission.
-        if (created[0].category) {
-            invalidateCategoryListCache();
-        }
         return { product: created[0], priceChanged: false, isNew: true };
     }
 
@@ -224,13 +134,6 @@ async function upsertFromProviderData(providerData, session) {
         await cache.del('product:' + existing._id.toString());
     }
 
-    // A category appearing, disappearing, or changing on an existing product
-    // can add or remove a whole row from the browse list - most often when a
-    // re-scrape fills in a category the adapter previously couldn't extract.
-    if (String(existing.category || '') !== String(updated.category || '')) {
-        invalidateCategoryListCache();
-    }
-
     return { product: updated, priceChanged, isNew: false };
 }
 
@@ -241,8 +144,5 @@ module.exports = {
     findStale,
     findStaleWithActiveAlerts,
     searchByText,
-    findDistinctCategories,
-    findByCategory,
-    countByCategory,
     upsertFromProviderData,
 };

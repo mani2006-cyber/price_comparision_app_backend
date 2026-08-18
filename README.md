@@ -14,6 +14,7 @@ A backend for a price-comparison platform: search products across multiple marke
   - [Auth](#auth--apiauth)
   - [Search & products](#search--products--api)
   - [Categories](#categories--apicategories)
+  - [Admin catalog](#admin-catalog--apiadminproducts--every-route-x-admin-key-header)
   - [Wishlist](#wishlist--apiwishlist)
   - [Alerts](#alerts--apialerts)
   - [Notifications](#notifications--apinotifications)
@@ -120,6 +121,7 @@ See `.env.example` for the full list with defaults. The ones worth knowing about
 | `COMPARE_MIN_PRICE_RATIO` / `COMPARE_MAX_PRICE_RATIO` / `COMPARE_MIN_TITLE_SIMILARITY` | Cross-marketplace matching thresholds (`src/utils/similarity.js`) — see that file's own comments for the regression stories (Fujifilm camera, accessory price mismatch) behind each specific value. |
 | `PRODUCT_MAX_IMAGES` | Image-count cap, enforced identically in `Product.model.js`'s schema, `provider.interface.js`'s adapter-output validator, and every adapter's own truncation — all three read this same value so they can't silently drift out of sync. |
 | `CATEGORY_DEFAULT_LIMIT` / `CATEGORY_MAX_LIMIT` | Default and maximum page size for `GET /categories/:category/products`. |
+| `ADMIN_API_KEY` | Required for `/api/admin/products/*` to accept **any** request — checked against the `x-admin-key` header. Single shared secret, no per-user admin accounts. Unset = every admin route rejects (fails closed), not "admin routes disabled". |
 | `SEARCH_DEFAULT_LIMIT` / `SEARCH_MAX_LIMIT` | Default and maximum page size for `GET /search` — paginates the already-fetched, already-cached merged result set (see that route's own notes above), not a separate fetch per page. |
 | `SIMILAR_PRODUCTS_DEFAULT_LIMIT` / `SIMILAR_PRODUCTS_MAX_LIMIT` | Default and maximum page size for `result.similarProducts` on `POST /compare-url`. `MAX_SIMILAR_PRODUCTS` (separate var) caps the underlying pool these paginate over, not the page size itself. |
 | `SSE_HEARTBEAT_MS` | How often the notification stream (`GET /notifications/stream`) writes a keepalive ping. |
@@ -135,7 +137,7 @@ Every response is JSON with a `success: boolean` field. Errors look like:
 ```
 (`details` is only present for validation failures; `stack` is only present outside production, and only for real 5xx errors.)
 
-**Auth** — routes marked 🔒 require `Authorization: Bearer <accessToken>`. Get one from signup/login.
+**Auth** — routes marked 🔒 require `Authorization: Bearer <accessToken>`. Get one from signup/login. Routes marked 🔑 require an `x-admin-key` header instead — a separate, single shared secret (`ADMIN_API_KEY`), not a user token.
 
 ---
 
@@ -179,22 +181,29 @@ Rate-limited (`AUTH_RATE_LIMIT_*`), stricter than the app-wide default. `signup`
 
 ### Categories — `/api/categories`
 
+Category browsing is backed by an **admin-curated catalog** (`AdminProduct`), not scraped marketplace data — the read side of the admin routes below. This replaced an earlier version that derived categories from whatever a prior `/search`/`/compare-url` call happened to persist, which meant coverage was entirely accidental (dense wherever users had searched, empty everywhere else, and skewed toward whichever marketplace's adapter happened to extract a category most reliably). An admin explicitly deciding what belongs in a category is the deliberate fix for that.
+
 | Method | Path | Auth | Query | Response |
 |---|---|---|---|---|
-| GET | `/` | — | — | `200` `{ success, count, categories }` — `categories[]` is `{ category, count }`, alphabetical |
-| GET | `/:category/products` | — | `?sortBy=price_asc\|price_desc\|rating&page=&limit=` | `200` `{ success, result }` — `result.products`, `result.total`, `result.totalPages`, `result.page`, `result.limit` |
+| GET | `/` | — | — | `200` `{ success, count, categories }` — `categories[]` is `{ category, count }`, alphabetical, `status: 'hidden'` entries excluded |
+| GET | `/:category/products` | — | `?sortBy=price_asc\|price_desc\|rating&page=&limit=` | `200` `{ success, result }` — `result.products` are `AdminProduct` cards (`title`, `description`, `category`, `price`, `image`), plus `total`/`totalPages`/`page`/`limit` |
+| GET | `/:category/products/:id` | — | `?sortBy=&page=&limit=` | `200` `{ success, result }` — `result.adminProduct` (the clicked card) + `result.listings` (live cross-marketplace search results for it, same shape as `GET /search`) |
 
-- This browses the **already-persisted catalog** — products a prior `/search` or `/compare-url` call already found and saved — it never triggers a live marketplace fetch the way `/search` does. A category with nothing saved for it yet returns an empty list, not an error.
-- `category` matching is **case-insensitive** (MongoDB collation, not a regex) — `/categories/headphones/products` and `/categories/Headphones/products` are the same request.
-- Coverage by marketplace (each is a deliberate tradeoff, not an oversight):
-  - `myntra` — embedded directly in the search-results response, no extra cost.
-  - `nykaa` — its search path already fetches each result's own product page for an unrelated reason (that site's search endpoint carries no price at all), so category comes along for free.
-  - `lenskart` — always set (defaults to `"Eyewear"` if the source page's own classification is missing).
-  - `vijaysales` — free: the underlying Unbxd search API already returns a full category breadcrumb (`l1`..`l4`) per result that the adapter just wasn't reading before.
-  - `poorvika` — **not** free: search-result cards carry no category signal at all, so this adapter fetches each result's own product page in parallel (best-effort — one result's page failing to load just leaves that result's category `null`, the way Nykaa's own equivalent fetch already behaves).
-  - `amazon` — deliberately left unset. Category only exists via a separate, metered RapidAPI endpoint (`/product-details`, not `/search`); fetching it per search result would burn through the same RapidAPI quota `/search` and `/compare-url` both depend on (confirmed live: a `429` from that exact subscription while investigating this).
-  - `flipkart` — deliberately left unset. Investigated a per-product category signal embedded in the search page's own React payload; it's inconsistent across identical requests (found it once, then missed it on all 40 further attempts) and the product-detail page's version is a React Server Components stream that would need resolving indirect content references — too fragile to ship.
-- `limit` is capped at 50; default `page=1`, `limit=20`.
+- `category` matching is **case-insensitive** (MongoDB collation, not a regex) — `/categories/headphones/products` and `/categories/Headphones/products` are the same request. `limit` is capped at `CATEGORY_MAX_LIMIT` (50); default `page=1`, `limit=CATEGORY_DEFAULT_LIMIT` (20).
+- The `:id` route is the "click a catalog card" flow: an `AdminProduct` entry has no real marketplace listing behind it (it's just curated `title`/`description`/`category`/`price` metadata), so clicking one triggers a genuine live multi-marketplace search keyed by its `title` — reusing `search.service.js`'s `runSearch` wholesale (same caching/pagination/persistence `GET /search` already has), just with the user's search-history recording skipped (a catalog click isn't something the user typed). A `status: 'hidden'` product 404s here too, not just from the listing above — hiding it removes it from both surfaces at once.
+- All three routes are HTTP-response cached (`CACHE_CATEGORY_TTL_SECONDS`), and every write through the admin routes below actively invalidates the `GET /` list cache — no waiting out the TTL to see a newly-added category appear.
+
+### Admin catalog — `/api/admin/products` 🔑 (every route, `x-admin-key` header)
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| POST | `/` | `{ title, description?, category, price, image?, status? }` | `201` `{ success, product }` |
+| GET | `/` | — (query: `?category=&page=&limit=`) | `200` `{ success, result }` — includes `hidden` entries too (admin view) |
+| GET | `/:id` | — | `200` `{ success, product }` |
+| PATCH | `/:id` | any subset of the create fields | `200` `{ success, product }` |
+| DELETE | `/:id` | — | `200` `{ success, message }` |
+
+This is the write side behind `GET /api/categories` above. Auth is a single shared secret (`ADMIN_API_KEY`, sent as `x-admin-key`) checked by `adminAuth.middleware.js` — **not** the user JWT system; there's no per-user admin role yet. The middleware fails **closed**: if `ADMIN_API_KEY` is unset, every admin route rejects with `500`, never silently allows requests through the way an unconfigured optional feature (e.g. OpenRouter) would. `status: 'hidden'` unpublishes an entry from public category browsing without deleting it; the admin CRUD routes can still see and edit it. `PATCH` with an empty body returns `400` (nothing to update).
 
 ### Wishlist — `/api/wishlist` 🔒 (every route)
 
@@ -250,7 +259,7 @@ The connection also sends a comment-only `: ping` line every 25 seconds (keeps i
 
 Two different layers, depending on the route:
 
-- **HTTP-level** (`src/middleware/cache.middleware.js`, a `cacheResponse()` wrapper) — used by `GET /products/:id`, `GET /notifications`, and both category routes. Every response through this layer carries an `X-Cache: HIT` or `MISS` header. On a HIT, the request never reaches the controller at all.
+- **HTTP-level** (`src/middleware/cache.middleware.js`, a `cacheResponse()` wrapper) — used by `GET /products/:id`, `GET /notifications`, and all three category routes (including the `:id` "click through" listings route — it never records search history the way `GET /search` does, so a cache HIT short-circuiting before the controller is safe there too). Every response through this layer carries an `X-Cache: HIT` or `MISS` header. On a HIT, the request never reaches the controller at all.
 - **Service-level** (`src/utils/cache.js`'s `getOrSet()`, a plain cache-aside) — used by `GET /search` and `POST /compare-url`. `product.service.js`'s `searchAndPersist()` and `compare.service.js`'s `computeComparison()` each cache only the expensive part (the live marketplace fetch(es), matching, and — for compare-url — the AI summary call), by query text / URL alone; the controller **always** runs regardless of hit/miss, and any per-request shaping (search-history recording, `similarProducts` pagination) happens fresh every time on top of the cached-or-fresh result — no `X-Cache` header here, and no route ever short-circuits before reaching it.
 
 That split exists on purpose, and both routes ended up there for related but distinct reasons. Search used to be HTTP-level-cached too (guest-only), because a cache HIT skipping the controller would also skip search-history recording for a logged-in user - so authenticated search had to opt out of caching entirely just to keep history working. Compare-url used to be HTTP-level-cached unconditionally too, until `result.similarProducts` became paginated: an HTTP-level whole-response cache keyed on the URL alone would have frozen whichever page got requested *first* and served that exact page to every caller for the rest of the TTL, no matter what page they actually asked for. Moving both down a layer fixes both problems the same way: the shared, expensive fetch is cached for everyone, while whatever runs on top of it (history recording, pagination) can no longer be silently skipped or staled by a cache hit. See `product.service.js`'s header comment on `searchAndPersist`, `compare.service.js`'s header comment, and `tests/integration/routes/product.routes.test.js`'s `"a repeat authenticated search hits the marketplace fetch only ONCE, but records history BOTH times"` / `"a cached URL still returns the correct page on a second call with DIFFERENT pagination"` tests for the proof.

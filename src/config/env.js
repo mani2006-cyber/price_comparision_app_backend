@@ -230,6 +230,16 @@ const config = {
         maxLimit: getNumber('CATEGORY_MAX_LIMIT', 50),
     },
 
+    // Gates every /api/admin/products/* route (adminAuth.middleware.js) -
+    // a single shared secret, not per-user roles/accounts. Deliberately
+    // NOT an "enabled: !!key" optional feature like openRouter above:
+    // an unset key here means the middleware fails CLOSED (rejects every
+    // request), never open - unlike a missing OpenRouter key, a missing
+    // admin key must never silently disable a security check.
+    admin: {
+        apiKey: getString('ADMIN_API_KEY', null),
+    },
+
     // GET /search used to return every result from every active
     // marketplace in one unpaginated response (up to
     // scraper.maxSearchResults x however many marketplaces are active -

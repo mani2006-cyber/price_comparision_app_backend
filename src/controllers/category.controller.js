@@ -1,8 +1,8 @@
 // src/controllers/category.controller.js
 //
-// HTTP layer over category.service.js. Both routes are public (no auth) -
-// browsing a category is the same "look, don't touch" concern as
-// GET /products/:id, not a per-user action.
+// HTTP layer over category.service.js. All three routes are public (no
+// auth) - browsing the catalog and clicking through to live listings are
+// both "look, don't touch" concerns, same as GET /products/:id.
 
 'use strict';
 
@@ -22,4 +22,13 @@ async function getCategoryProducts(req, res) {
     res.status(200).json({ success: true, result });
 }
 
-module.exports = { listCategories, getCategoryProducts };
+async function getProductListings(req, res) {
+    const result = await categoryService.getProductListings(req.params.id, {
+        sortBy: req.query.sortBy,
+        page: req.query.page,
+        limit: req.query.limit,
+    });
+    res.status(200).json({ success: true, result });
+}
+
+module.exports = { listCategories, getCategoryProducts, getProductListings };
