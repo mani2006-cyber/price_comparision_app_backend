@@ -276,7 +276,11 @@ const config = {
         model: getString('OPENROUTER_MODEL', 'nvidia/nemotron-3-ultra-550b-a55b:free'),
         timeoutMs: getNumber('OPENROUTER_TIMEOUT_MS', 20000),
         // Were bare literals in aiComparison.service.js's own chat.send() call.
-        maxTokens: getNumber('OPENROUTER_MAX_TOKENS', 200),
+        // 200 used to cut summaries off mid-sentence in practice (confirmed
+        // live) - 400 gives real headroom over the prompt's own ~60-word/
+        // 2-3 sentence cap, including models that spend some of the budget
+        // on internal reasoning tokens before the visible answer.
+        maxTokens: getNumber('OPENROUTER_MAX_TOKENS', 400),
         temperature: getNumber('OPENROUTER_TEMPERATURE', 0.4),
     },
 };

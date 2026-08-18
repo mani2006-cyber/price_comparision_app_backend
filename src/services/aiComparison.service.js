@@ -38,10 +38,12 @@ function buildPrompt(originalProduct, matches) {
     return (
         'Here is one product found on multiple Indian e-commerce marketplaces:\n\n' +
         lines.join('\n') +
-        '\n\nIn 2-3 short sentences, tell the shopper which listing is the better deal ' +
-        'and why (price difference, and only mention rating/seller if it materially ' +
-        'changes the recommendation). Be direct and concrete - use the actual numbers ' +
-        'above, not vague language. Do not use markdown formatting.'
+        '\n\nIn 2-3 short sentences (at most 60 words total), tell the shopper which ' +
+        'listing is the better deal and why (price difference, and only mention ' +
+        'rating/seller if it materially changes the recommendation). Be direct and ' +
+        'concrete - use the actual numbers above, not vague language. Do not use ' +
+        'markdown formatting. Always finish your final sentence - never trail off ' +
+        'mid-thought.'
     );
 }
 
