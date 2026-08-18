@@ -9,11 +9,17 @@ const { z } = require('zod');
 const { STATUS_VALUES } = require('../models/AdminProduct.model');
 
 // POST /api/admin/products
+// url: optional - only a well-formedness check here (same as
+// compareUrlBodySchema in product.validators.js). WHICH marketplace it
+// belongs to, and whether that marketplace is supported, is checked in
+// adminProduct.service.js (needs adapters.detectMarketplaceFromUrl, a
+// service-layer concern) - only when url is actually provided.
 const createAdminProductBodySchema = z.object({
     title: z.string("A 'title' is required").trim().min(1, "A 'title' is required"),
     description: z.string().trim().min(1).optional(),
     category: z.string("A 'category' is required").trim().min(1, "A 'category' is required"),
     price: z.coerce.number("'price' must be a number").positive("'price' must be a positive number"),
+    url: z.string().trim().min(1, "'url' cannot be blank").url("A valid product 'url' is required").optional(),
     image: z.string().trim().url("'image' must be a valid URL").optional(),
     // Optional - lets an admin create a draft entry straight into
     // 'hidden' (not yet ready for public category browsing) instead of
@@ -29,6 +35,12 @@ const updateAdminProductBodySchema = z.object({
     description: z.string().trim().min(1).optional(),
     category: z.string().trim().min(1, "'category' cannot be blank").optional(),
     price: z.coerce.number("'price' must be a number").positive("'price' must be a positive number").optional(),
+    // nullable (unlike the create schema's url) - PATCH is the only way
+    // to CLEAR a url once set, reverting that card back to the plain-
+    // search click-through. `null` explicitly means "remove it"; simply
+    // omitting the key (like every other field here) means "leave it
+    // alone" - z.string().optional() alone would reject an explicit null.
+    url: z.string().trim().min(1, "'url' cannot be blank").url("A valid product 'url' is required").nullable().optional(),
     image: z.string().trim().url("'image' must be a valid URL").optional(),
     status: z.enum(STATUS_VALUES).optional(),
 }).refine(function(data) { return Object.keys(data).length > 0; }, {

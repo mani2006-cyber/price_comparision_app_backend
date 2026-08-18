@@ -3,12 +3,18 @@
 // A manually-curated catalog entry, used to populate category browsing
 // (GET /api/categories) - deliberately separate from Product.model.js,
 // which is the marketplace-comparison entity keyed by (marketplace,
-// externalId) and driven by live scraper/API data. An admin entry has no
-// real marketplace, URL, or price-refresh cycle behind it - it exists
-// purely to say "this thing belongs in this category, go find current
-// listings for it on click" (see adminProduct.service.js's
-// getListingsForProduct, which triggers the live multi-marketplace
-// search on demand rather than this model tracking a price itself).
+// externalId) and driven by live scraper/API data.
+//
+// `url` is OPTIONAL, and it changes what a click on this card does (see
+// category.service.js's getProductListings): with no url (the seeded
+// catalog's 90 entries, still title-only), a click runs a plain live
+// title search across marketplaces, same as GET /search. With a url set
+// - one specific marketplace listing the admin picked by hand - a click
+// instead runs the real compare-url pipeline against it (live fetch,
+// genuine cross-marketplace matching, price gate, similarProducts, AI
+// summary). Deliberately backward-compatible: existing url-less entries
+// and whatever already consumes their response shape keep working
+// completely unchanged.
 
 'use strict';
 
@@ -38,6 +44,15 @@ const adminProductSchema = new mongoose.Schema({
     price: {
         type: Number,
         required: true,
+    },
+    // Optional - see this file's own header comment for how its
+    // presence/absence changes what a click on this card does.
+    // Validated against a supported marketplace at write time too, not
+    // just at click time, when provided - see adminProduct.service.js.
+    url: {
+        type: String,
+        default: null,
+        trim: true,
     },
     image: {
         type: String,

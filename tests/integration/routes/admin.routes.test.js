@@ -88,6 +88,31 @@ describe('POST /api/admin/products', function() {
 
         expect(res.status).toBe(400);
     });
+
+    it('creates fine with no url at all - it is optional', async function() {
+        const res = await request(app).post('/api/admin/products').set('x-admin-key', ADMIN_KEY).send(makeBody());
+        expect(res.status).toBe(201);
+        expect(res.body.product.url).toBeNull();
+    });
+
+    it('rejects a malformed url with a 400 (zod layer, before the marketplace check)', async function() {
+        const res = await request(app).post('/api/admin/products').set('x-admin-key', ADMIN_KEY).send(makeBody({ url: 'not-a-url' }));
+        expect(res.status).toBe(400);
+    });
+
+    it('rejects a well-formed url from an unsupported marketplace with a 400 (service layer)', async function() {
+        const res = await request(app).post('/api/admin/products').set('x-admin-key', ADMIN_KEY).send(makeBody({ url: 'https://www.ebay.com/itm/123' }));
+        expect(res.status).toBe(400);
+    });
+
+    it('accepts a valid url from a supported marketplace', async function() {
+        const res = await request(app)
+            .post('/api/admin/products')
+            .set('x-admin-key', ADMIN_KEY)
+            .send(makeBody({ url: 'https://www.amazon.in/dp/ADMINROUTETEST1' }));
+        expect(res.status).toBe(201);
+        expect(res.body.product.url).toBe('https://www.amazon.in/dp/ADMINROUTETEST1');
+    });
 });
 
 describe('GET /api/admin/products/:id, PATCH, DELETE', function() {
@@ -114,6 +139,19 @@ describe('GET /api/admin/products/:id, PATCH, DELETE', function() {
 
         const afterDelete = await request(app).get('/api/admin/products/' + id).set('x-admin-key', ADMIN_KEY);
         expect(afterDelete.status).toBe(404);
+    });
+
+    it('PATCH url:null explicitly clears an existing url', async function() {
+        const created = await request(app)
+            .post('/api/admin/products')
+            .set('x-admin-key', ADMIN_KEY)
+            .send(makeBody({ url: 'https://www.amazon.in/dp/ADMINROUTETEST2' }));
+        const id = created.body.product._id;
+
+        const cleared = await request(app).patch('/api/admin/products/' + id).set('x-admin-key', ADMIN_KEY).send({ url: null });
+
+        expect(cleared.status).toBe(200);
+        expect(cleared.body.product.url).toBeNull();
     });
 
     it('rejects a PATCH with an empty body with a 400', async function() {

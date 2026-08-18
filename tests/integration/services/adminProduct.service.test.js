@@ -47,6 +47,22 @@ describe('createProduct', function() {
         expect(product._id).toBeDefined();
         expect(product.title).toBe(PREFIX + 'New Thing');
     });
+
+    it('accepts no url at all - it is optional', async function() {
+        const product = await adminProductService.createProduct(makeData());
+        expect(product.url).toBeNull();
+    });
+
+    it('accepts a url from a supported marketplace', async function() {
+        const product = await adminProductService.createProduct(makeData({ url: 'https://www.amazon.in/dp/ADMINSVCTEST1' }));
+        expect(product.url).toBe('https://www.amazon.in/dp/ADMINSVCTEST1');
+    });
+
+    it('rejects a url from an unsupported marketplace with a 400', async function() {
+        await expect(
+            adminProductService.createProduct(makeData({ url: 'https://www.ebay.com/itm/123' }))
+        ).rejects.toMatchObject({ statusCode: 400 });
+    });
 });
 
 describe('listProducts', function() {
@@ -88,6 +104,19 @@ describe('updateProduct', function() {
         const created = await adminProductService.createProduct(makeData({ price: 1000 }));
         const updated = await adminProductService.updateProduct(created._id.toString(), { price: 2000 });
         expect(updated.price).toBe(2000);
+    });
+
+    it('rejects a url update from an unsupported marketplace with a 400', async function() {
+        const created = await adminProductService.createProduct(makeData());
+        await expect(
+            adminProductService.updateProduct(created._id.toString(), { url: 'https://www.ebay.com/itm/123' })
+        ).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('accepts a valid url update, turning a plain-search card into a compare-url one', async function() {
+        const created = await adminProductService.createProduct(makeData());
+        const updated = await adminProductService.updateProduct(created._id.toString(), { url: 'https://www.amazon.in/dp/ADMINSVCTEST2' });
+        expect(updated.url).toBe('https://www.amazon.in/dp/ADMINSVCTEST2');
     });
 });
 

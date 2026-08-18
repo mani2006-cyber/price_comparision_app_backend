@@ -187,23 +187,29 @@ Category browsing is backed by an **admin-curated catalog** (`AdminProduct`), no
 |---|---|---|---|---|
 | GET | `/` | — | — | `200` `{ success, count, categories }` — `categories[]` is `{ category, count }`, alphabetical, `status: 'hidden'` entries excluded |
 | GET | `/:category/products` | — | `?sortBy=price_asc\|price_desc\|rating&page=&limit=` | `200` `{ success, result }` — `result.products` are `AdminProduct` cards (`title`, `description`, `category`, `price`, `image`), plus `total`/`totalPages`/`page`/`limit` |
-| GET | `/:category/products/:id` | — | `?sortBy=&page=&limit=` | `200` `{ success, result }` — `result.adminProduct` (the clicked card) + `result.listings` (live cross-marketplace search results for it, same shape as `GET /search`) |
+| GET | `/:category/products/:id` | — | `?sortBy=&page=&limit=` | `200` `{ success, result }` — `result.adminProduct` (the clicked card) + **either** `result.listings` **or** `result.comparison` (the other is `null`) — see below |
 
 - `category` matching is **case-insensitive** (MongoDB collation, not a regex) — `/categories/headphones/products` and `/categories/Headphones/products` are the same request. `limit` is capped at `CATEGORY_MAX_LIMIT` (50); default `page=1`, `limit=CATEGORY_DEFAULT_LIMIT` (20).
-- The `:id` route is the "click a catalog card" flow: an `AdminProduct` entry has no real marketplace listing behind it (it's just curated `title`/`description`/`category`/`price` metadata), so clicking one triggers a genuine live multi-marketplace search keyed by its `title` — reusing `search.service.js`'s `runSearch` wholesale (same caching/pagination/persistence `GET /search` already has), just with the user's search-history recording skipped (a catalog click isn't something the user typed). A `status: 'hidden'` product 404s here too, not just from the listing above — hiding it removes it from both surfaces at once.
+- The `:id` route is the "click a catalog card" flow, and it branches on whether that `AdminProduct` has a `url` set:
+  - **No `url`** (every seeded entry today): a genuine live multi-marketplace search keyed by the card's `title` — reusing `search.service.js`'s `runSearch` wholesale (same caching/pagination/persistence `GET /search` already has), with the user's search-history recording skipped (a catalog click isn't something the user typed). Response: `result.listings` populated, `result.comparison: null`.
+  - **`url` set**: the admin picked one specific marketplace listing by hand, so instead of a title-based guess, that exact `url` runs through the real `POST /compare-url` pipeline (`compareService.compareByUrl`) — live fetch, genuine cross-marketplace matching, price gate, paginated `similarProducts`, optional AI summary. Response: `result.comparison` populated (same shape `POST /compare-url` itself returns), `result.listings: null`.
+  - Both branches return the *same two keys* either way (one always `null`) — a stable response shape regardless of which mode a given card is in. `url` is a purely additive, optional field: existing url-less entries and anything already reading `result.listings` keep working completely unchanged.
+  - A `status: 'hidden'` product 404s here too, not just from the listing above — hiding it removes it from both surfaces at once.
 - All three routes are HTTP-response cached (`CACHE_CATEGORY_TTL_SECONDS`), and every write through the admin routes below actively invalidates the `GET /` list cache — no waiting out the TTL to see a newly-added category appear.
 
 ### Admin catalog — `/api/admin/products` 🔑 (every route, `x-admin-key` header)
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| POST | `/` | `{ title, description?, category, price, image?, status? }` | `201` `{ success, product }` |
+| POST | `/` | `{ title, description?, category, price, url?, image?, status? }` | `201` `{ success, product }` |
 | GET | `/` | — (query: `?category=&page=&limit=`) | `200` `{ success, result }` — includes `hidden` entries too (admin view) |
 | GET | `/:id` | — | `200` `{ success, product }` |
-| PATCH | `/:id` | any subset of the create fields | `200` `{ success, product }` |
+| PATCH | `/:id` | any subset of the create fields (`url: null` explicitly clears it) | `200` `{ success, product }` |
 | DELETE | `/:id` | — | `200` `{ success, message }` |
 
 This is the write side behind `GET /api/categories` above. Auth is a single shared secret (`ADMIN_API_KEY`, sent as `x-admin-key`) checked by `adminAuth.middleware.js` — **not** the user JWT system; there's no per-user admin role yet. The middleware fails **closed**: if `ADMIN_API_KEY` is unset, every admin route rejects with `500`, never silently allows requests through the way an unconfigured optional feature (e.g. OpenRouter) would. `status: 'hidden'` unpublishes an entry from public category browsing without deleting it; the admin CRUD routes can still see and edit it. `PATCH` with an empty body returns `400` (nothing to update).
+
+`url` is **optional** (see the `:id` route above for what it changes) but validated when given, against the same supported-marketplace list `POST /compare-url` uses (`adapters.detectMarketplaceFromUrl`) — a url from an unsupported site is rejected with `400` at creation/update time, not silently accepted and only discovered broken later when a user clicks the card. `price` stays a separate, admin-entered field shown on the catalog card itself (before any click); it is never derived from `url`'s live price.
 
 ### Wishlist — `/api/wishlist` 🔒 (every route)
 

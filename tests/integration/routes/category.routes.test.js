@@ -3,10 +3,12 @@
 // Route-level tests for category browsing. GET / and GET /:category/products
 // never touch a marketplace - they only read the admin-curated catalog
 // (AdminProduct). GET /:category/products/:id is the "click through"
-// route - it DOES trigger a real search pipeline under the hood (see
-// category.service.js's getProductListings), so it needs the same
-// adapters/cache mocking product.routes.test.js's /search tests use.
-// All three routes are public, no auth.
+// route - it triggers a real live pipeline under the hood (see
+// category.service.js's getProductListings): a plain title search when
+// the product has no url, or the real compare-url pipeline when it
+// does - so it needs the same adapters/cache mocking product.routes.
+// test.js's /search and POST /compare-url tests both use. All three
+// routes are public, no auth.
 
 'use strict';
 
@@ -164,7 +166,7 @@ describe('GET /api/categories/:category/products', function() {
 });
 
 describe('GET /api/categories/:category/products/:id', function() {
-    it('triggers a live search keyed by the admin product title and returns its listings', async function() {
+    it('no url set - triggers a live search keyed by the admin product title, returns result.listings', async function() {
         const product = await AdminProduct.create(makeAdminProduct({ category: 'CatRouteTestClick' }));
         adapters.searchAllMarketplaces.mockResolvedValue({ results: [fakeSearchResult()], failures: [] });
 
@@ -173,7 +175,25 @@ describe('GET /api/categories/:category/products/:id', function() {
         expect(res.status).toBe(200);
         expect(res.body.result.adminProduct._id).toBe(product._id.toString());
         expect(res.body.result.listings.products).toHaveLength(1);
+        expect(res.body.result.comparison).toBeNull();
         expect(adapters.searchAllMarketplaces).toHaveBeenCalledWith(product.title, expect.anything());
+    });
+
+    it('url set - runs it through the compare-url pipeline, returns result.comparison', async function() {
+        const clickUrl = 'https://www.amazon.in/dp/' + PREFIX + 'CLICKURL1';
+        const product = await AdminProduct.create(makeAdminProduct({ category: 'CatRouteTestClickUrl', url: clickUrl }));
+        adapters.detectMarketplaceFromUrl.mockReturnValue('amazon');
+        adapters.searchByLink.mockResolvedValue(fakeSearchResult({ rawUrl: clickUrl }));
+        adapters.searchAllMarketplaces.mockResolvedValue({ results: [fakeSearchResult({ rawUrl: clickUrl })], failures: [] });
+
+        const res = await request(app).get('/api/categories/CatRouteTestClickUrl/products/' + product._id.toString());
+
+        expect(res.status).toBe(200);
+        expect(res.body.result.adminProduct._id).toBe(product._id.toString());
+        expect(res.body.result.listings).toBeNull();
+        expect(res.body.result.comparison.detectedMarketplace).toBe('amazon');
+        expect(res.body.result.comparison.results).toHaveLength(1);
+        expect(adapters.searchByLink).toHaveBeenCalledWith(clickUrl);
     });
 
     it('returns 404 for an id that does not exist', async function() {

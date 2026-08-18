@@ -3,18 +3,22 @@
 // Integration test for category.service.js. listCategories/
 // getProductsByCategory hit the real DB (AdminProduct) - no mocking
 // needed, same as the old Product-backed version this replaces.
-// getProductListings mocks search.service.js (one layer down) - it's
-// only a pass-through to runSearch plus an AdminProduct lookup, and
-// runSearch's own behavior is already covered by search.service.test.js.
+// getProductListings mocks search.service.js AND compare.service.js (one
+// layer down) - it's only a pass-through to one or the other plus an
+// AdminProduct lookup (branching on whether the product has a url - see
+// category.service.js's own comment), and runSearch/compareByUrl's own
+// behavior is already covered by their respective test files.
 
 'use strict';
 
 jest.mock('../../../src/services/search.service');
+jest.mock('../../../src/services/compare.service');
 
 const mongoose = require('mongoose');
 const config = require('../../../src/config/env');
 const AdminProduct = require('../../../src/models/AdminProduct.model');
 const searchService = require('../../../src/services/search.service');
+const compareService = require('../../../src/services/compare.service');
 const categoryService = require('../../../src/services/category.service');
 
 const PREFIX = 'CATSVCTEST_';
@@ -127,14 +131,41 @@ describe('getProductListings', function() {
         await expect(categoryService.getProductListings(hidden._id.toString(), {})).rejects.toMatchObject({ statusCode: 404 });
     });
 
-    it('runs a live search keyed by the admin product title, WITHOUT a userId (never records search history)', async function() {
-        const product = await AdminProduct.create(makeAdminProduct({ title: PREFIX + 'Noise Cancelling Headphones' }));
-        searchService.runSearch.mockResolvedValue({ products: [{ currentPrice: 999 }], total: 1, page: 1, limit: 6, totalPages: 1, marketplaceFailures: [] });
+    describe('no url set (today\'s seeded catalog)', function() {
+        it('runs a live search keyed by the admin product title, WITHOUT a userId (never records search history)', async function() {
+            const product = await AdminProduct.create(makeAdminProduct({ title: PREFIX + 'Noise Cancelling Headphones' }));
+            searchService.runSearch.mockResolvedValue({ products: [{ currentPrice: 999 }], total: 1, page: 1, limit: 6, totalPages: 1, marketplaceFailures: [] });
 
-        const result = await categoryService.getProductListings(product._id.toString(), { page: 1, limit: 6 });
+            const result = await categoryService.getProductListings(product._id.toString(), { page: 1, limit: 6 });
 
-        expect(searchService.runSearch).toHaveBeenCalledWith(product.title, null, { page: 1, limit: 6 });
-        expect(result.adminProduct._id.toString()).toBe(product._id.toString());
-        expect(result.listings.products).toHaveLength(1);
+            expect(searchService.runSearch).toHaveBeenCalledWith(product.title, null, { page: 1, limit: 6 });
+            expect(compareService.compareByUrl).not.toHaveBeenCalled();
+            expect(result.adminProduct._id.toString()).toBe(product._id.toString());
+            expect(result.listings.products).toHaveLength(1);
+            expect(result.comparison).toBeNull();
+        });
+    });
+
+    describe('url set', function() {
+        it('runs the url through compareByUrl instead of searching by title', async function() {
+            const product = await AdminProduct.create(makeAdminProduct({ url: 'https://www.amazon.in/dp/CATSVCCLICK1' }));
+            compareService.compareByUrl.mockResolvedValue({
+                originalUrl: product.url,
+                detectedMarketplace: 'amazon',
+                matchesFound: 1,
+                results: [{ currentPrice: 999 }],
+                similarProducts: [],
+                marketplaceFailures: [],
+                aiSummary: null,
+            });
+
+            const result = await categoryService.getProductListings(product._id.toString(), { page: 1, limit: 6 });
+
+            expect(compareService.compareByUrl).toHaveBeenCalledWith(product.url, { page: 1, limit: 6 });
+            expect(searchService.runSearch).not.toHaveBeenCalled();
+            expect(result.adminProduct._id.toString()).toBe(product._id.toString());
+            expect(result.comparison.results).toHaveLength(1);
+            expect(result.listings).toBeNull();
+        });
     });
 });
