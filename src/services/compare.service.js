@@ -49,11 +49,11 @@ async function computeComparison(url, marketplace) {
     // tracking automatically (File 17) - no separate "record this
     // observation" step needed here, unlike the old codebase's
     // fire-and-forget call.
-    const originalOutcome = await productService.refreshProductByLink(url);
+    const originalOutcome = await productService.refreshProductByLink(url, { skipCategory: true });
     const originalProduct = originalOutcome.product;
 
     // ── 2. Search ALL marketplaces using the original product's title ──
-    const searchResult = await productService.searchAndPersist(originalProduct.title);
+    const searchResult = await productService.searchAndPersist(originalProduct.title, { skipCategory: true });
 
     // ── 3. Cross-marketplace matches ONLY - never the same platform as the
     // original. This is a price COMPARISON across retailers, not a list of

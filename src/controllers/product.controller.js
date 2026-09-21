@@ -24,11 +24,6 @@ async function search(req, res) {
         platform: req.query.platform || undefined,
         page: req.query.page,
         limit: req.query.limit,
-        category: req.query.category,
-        brand: req.query.brand,
-        marketplace: req.query.marketplace,
-        minPrice: req.query.minPrice,
-        maxPrice: req.query.maxPrice,
     };
 
     // req.userId is set by optionalAuth ONLY if a valid access token was

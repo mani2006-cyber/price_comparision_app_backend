@@ -28,8 +28,9 @@ const UPSERT_CHUNK_SIZE = 5;
 // If platform-based filtering is ever implemented, THIS key must be
 // updated to include it, or two different platform filters would
 // silently share one cache entry and serve each other's results.
-function searchCacheKey(query) {
-    return 'search:' + String(query).trim().toLowerCase();
+function searchCacheKey(query, options) {
+    const suffix = options && options.skipCategory ? ':raw' : '';
+    return 'search:' + String(query).trim().toLowerCase() + suffix;
 }
 
 // Splits an array into fixed-size chunks - used to upsert search results
@@ -95,7 +96,7 @@ async function normalizeCategories(providerProducts) {
 // about caching.
 async function fetchAndPersist(query, options) {
     const { results, failures } = await adapters.searchAllMarketplaces(query, options);
-    const categorizedResults = await normalizeCategories(results);
+    const categorizedResults = options && options.skipCategory ? results : await normalizeCategories(results);
 
     const batches = chunk(categorizedResults, UPSERT_CHUNK_SIZE);
     const persisted = [];
@@ -129,21 +130,19 @@ async function fetchAndPersist(query, options) {
 // regardless of whether the underlying data came from cache or a fresh
 // fetch. Only the expensive part is ever skipped, never the side effect.
 async function searchAndPersist(query, options) {
-    const key = searchCacheKey(query);
+    const key = searchCacheKey(query, options);
 
     const { value, fromCache } = await cache.getOrSet(key, config.cacheTtl.search, function() {
         return fetchAndPersist(query, options);
     });
-    const normalizedProducts = await normalizeCategories(value.products);
-
     logger.info('Search and persist completed', {
         query,
-        persistedCount: normalizedProducts.length,
+        persistedCount: value.products.length,
         marketplaceFailures: value.marketplaceFailures,
         fromCache,
     });
 
-    return Object.assign({}, value, { products: normalizedProducts });
+    return value;
 }
 
 // ── Single product lookup ───────────────────────────────────────────
@@ -158,7 +157,7 @@ async function getProductDetail(productId) {
 // ── Refresh a single product by its marketplace URL ─────────────────
 // Used by the compare-url flow, and reusable later by the price-
 // refresher job for a targeted re-check of one specific product.
-async function refreshProductByLink(url) {
+async function refreshProductByLink(url, options) {
     const marketplace = adapters.detectMarketplaceFromUrl(url);
     if (!marketplace) {
         throw ApiError.badRequest('Could not detect a supported marketplace from this URL');
@@ -169,7 +168,7 @@ async function refreshProductByLink(url) {
         throw ApiError.badGateway('Could not extract product details from this URL');
     }
 
-    const categorizedProducts = await normalizeCategories([providerProduct]);
+    const categorizedProducts = options && options.skipCategory ? [providerProduct] : await normalizeCategories([providerProduct]);
     const outcome = await productRepository.upsertFromProviderData(categorizedProducts[0]);
     return { product: outcome.product, priceChanged: outcome.priceChanged, isNew: outcome.isNew };
 }
