@@ -199,6 +199,33 @@ describe('runSearch - pagination', function() {
 
         expect(page2.products.map(function(p) { return p.currentPrice; })).toEqual([11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
     });
+
+    it('filters before sorting and pagination, and reports filtered totals', async function() {
+        const products = [
+            { title: 'Dell laptop', category: 'Laptops', brand: 'Dell', marketplace: 'amazon', currentPrice: 50000 },
+            { title: 'HP laptop', category: 'Laptops', brand: 'HP', marketplace: 'amazon', currentPrice: 60000 },
+            { title: 'Dell laptop', category: 'Laptops', brand: 'Dell', marketplace: 'amazon', currentPrice: 70000 },
+            { title: 'Dell laptop bag', category: 'Laptop Bag', brand: 'Dell', marketplace: 'myntra', currentPrice: 1500 },
+        ];
+        productService.searchAndPersist.mockResolvedValue({ products, marketplaceFailures: [{ marketplace: 'flipkart', message: '403' }] });
+
+        const result = await searchService.runSearch('laptop', null, {
+            category: 'Laptops',
+            brand: 'dell',
+            marketplace: 'amazon',
+            minPrice: 40000,
+            maxPrice: 80000,
+            sortBy: 'price_desc',
+            page: 2,
+            limit: 1,
+        });
+
+        expect(result.products).toHaveLength(1);
+        expect(result.products[0].currentPrice).toBe(50000);
+        expect(result.total).toBe(2);
+        expect(result.totalPages).toBe(2);
+        expect(result.marketplaceFailures).toEqual([{ marketplace: 'flipkart', message: '403' }]);
+    });
 });
 
 describe('deleteSearchHistoryItem', function() {
@@ -210,5 +237,73 @@ describe('deleteSearchHistoryItem', function() {
         const result = await searchService.deleteSearchHistoryItem(history[0]._id, user._id);
 
         expect(result.deletedCount).toBe(1);
+    });
+});
+
+describe('filterProducts', function() {
+    const products = [
+        {
+            title: 'Dell Inspiron Laptop',
+            category: 'Laptops',
+            categoryPath: ['Electronics', 'Computers and Laptops'],
+            brand: 'Dell',
+            marketplace: 'amazon',
+            currentPrice: 60000,
+        },
+        {
+            title: 'Motorola Edge Phone',
+            category: 'Smartphones',
+            categoryPath: ['Electronics', 'Mobiles & Accessories'],
+            brand: 'Motorola',
+            marketplace: 'Flipkart',
+            currentPrice: 25000,
+        },
+        {
+            title: 'Mobile Laptop Sleeve',
+            category: 'Laptop Bag',
+            categoryPath: ['Fashion', 'Bags'],
+            brand: 'Dell',
+            marketplace: 'myntra',
+            currentPrice: 1500,
+        },
+    ];
+
+    it('matches category exactly and through categoryPath', function() {
+        expect(searchService.filterProducts(products, { category: 'Laptops' })).toHaveLength(1);
+        expect(searchService.filterProducts(products, { category: 'Mobiles' })).toHaveLength(1);
+    });
+
+    it('matches category case-insensitively and by contains', function() {
+        expect(searchService.filterProducts(products, { category: 'lAP' })).toHaveLength(2);
+        expect(searchService.filterProducts(products, { category: 'smart' })).toHaveLength(1);
+    });
+
+    it('does not match product.title for category filtering', function() {
+        expect(searchService.filterProducts(products, { category: 'mobile' })).toHaveLength(1);
+    });
+
+    it('matches brand using a case-insensitive contains match', function() {
+        expect(searchService.filterProducts(products, { brand: 'el' })).toHaveLength(2);
+    });
+
+    it('matches marketplace exactly and case-insensitively', function() {
+        expect(searchService.filterProducts(products, { marketplace: 'FLIPKART' })).toHaveLength(1);
+    });
+
+    it('filters by minimum and maximum price inclusively', function() {
+        expect(searchService.filterProducts(products, { minPrice: 25000 })).toHaveLength(2);
+        expect(searchService.filterProducts(products, { maxPrice: 25000 })).toHaveLength(2);
+    });
+
+    it('combines all supplied filters with AND logic', function() {
+        const result = searchService.filterProducts(products, {
+            category: 'laptop',
+            brand: 'dell',
+            marketplace: 'amazon',
+            minPrice: 30000,
+            maxPrice: 90000,
+        });
+        expect(result).toHaveLength(1);
+        expect(result[0].title).toBe('Dell Inspiron Laptop');
     });
 });

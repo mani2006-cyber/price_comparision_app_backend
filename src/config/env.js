@@ -293,6 +293,13 @@ const config = {
         maxTokens: getNumber('OPENROUTER_MAX_TOKENS', 400),
         temperature: getNumber('OPENROUTER_TEMPERATURE', 0.4),
     },
+
+    gemini: {
+        enabled: !!getString('GEMINI_API_KEY', null),
+        apiKey: getString('GEMINI_API_KEY', null),
+        model: getString('GEMINI_MODEL', 'gemini-flash-latest'),
+        timeoutMs: getNumber('GEMINI_TIMEOUT_MS', 30000),
+    },
 };
 
 // ── Cross-field validation ────────────────────────────────────────────

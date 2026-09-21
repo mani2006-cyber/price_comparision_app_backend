@@ -12,6 +12,14 @@ const config = require('../config/env');
 
 const SORT_BY_VALUES = ['price_asc', 'price_desc', 'rating'];
 
+const optionalTrimmedString = z.preprocess(function(value) {
+    return typeof value === 'string' && value.trim() === '' ? undefined : value;
+}, z.string().trim().min(1).optional());
+
+const optionalNonNegativePrice = z.preprocess(function(value) {
+    return typeof value === 'string' && value.trim() === '' ? undefined : value;
+}, z.coerce.number("price must be a number").finite("price must be a number").min(0, "price cannot be negative").optional());
+
 // GET /api/search - q is the only required field; the exact same
 // message is used for BOTH "missing entirely" (a plain object with no
 // q key parses q as undefined -> zod's type error) and "present but
@@ -36,6 +44,11 @@ const searchQuerySchema = z.object({
     platform: z.string().trim().min(1).optional(),
     page: z.coerce.number("'page' must be a number").int().min(1).optional(),
     limit: z.coerce.number("'limit' must be a number").int().min(1).max(config.search.maxLimit).optional(),
+    category: optionalTrimmedString,
+    brand: optionalTrimmedString,
+    marketplace: optionalTrimmedString,
+    minPrice: optionalNonNegativePrice,
+    maxPrice: optionalNonNegativePrice,
 });
 
 // POST /api/compare-url - a real URL, not just "any non-empty string"

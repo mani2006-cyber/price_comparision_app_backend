@@ -13,6 +13,7 @@ const cache = require('../utils/cache');
 const config = require('../config/env');
 const ApiError = require('../utils/ApiError');
 const logger = require('../utils/logger');
+const { classifyProducts } = require('./aiCategory.service');
 
 const UPSERT_CHUNK_SIZE = 5;
 
@@ -58,6 +59,35 @@ async function upsertSafely(providerProduct) {
     }
 }
 
+async function normalizeCategories(providerProducts) {
+    const candidates = providerProducts
+        .filter(function(product) {
+            return !product.category;
+        })
+        .map(function(product) {
+            return Object.assign({}, product, {
+                id: product.marketplace + ':' + product.externalId,
+                breadcrumb: Array.isArray(product.categoryPath) ? product.categoryPath.join(' > ') : '',
+                description: product.description || (product.metadata && product.metadata.description) || '',
+            });
+        });
+
+    if (candidates.length === 0) {
+        return providerProducts;
+    }
+
+    const classifications = await classifyProducts(candidates);
+
+    return providerProducts.map(function(product) {
+        if (product.category) return product;
+
+        const result = classifications[product.marketplace + ':' + product.externalId];
+        if (!result || result.category === 'unknown') return product;
+
+        return Object.assign({}, product, { category: result.category });
+    });
+}
+
 // Does the actual work: live marketplace search, then persist every
 // result. This is the expensive part (real HTTP calls out to every
 // marketplace, plus a MongoDB upsert per result) - searchAndPersist
@@ -65,8 +95,9 @@ async function upsertSafely(providerProduct) {
 // about caching.
 async function fetchAndPersist(query, options) {
     const { results, failures } = await adapters.searchAllMarketplaces(query, options);
+    const categorizedResults = await normalizeCategories(results);
 
-    const batches = chunk(results, UPSERT_CHUNK_SIZE);
+    const batches = chunk(categorizedResults, UPSERT_CHUNK_SIZE);
     const persisted = [];
 
     for (let i = 0; i < batches.length; i++) {
@@ -103,15 +134,16 @@ async function searchAndPersist(query, options) {
     const { value, fromCache } = await cache.getOrSet(key, config.cacheTtl.search, function() {
         return fetchAndPersist(query, options);
     });
+    const normalizedProducts = await normalizeCategories(value.products);
 
     logger.info('Search and persist completed', {
         query,
-        persistedCount: value.products.length,
+        persistedCount: normalizedProducts.length,
         marketplaceFailures: value.marketplaceFailures,
         fromCache,
     });
 
-    return value;
+    return Object.assign({}, value, { products: normalizedProducts });
 }
 
 // ── Single product lookup ───────────────────────────────────────────
@@ -137,7 +169,8 @@ async function refreshProductByLink(url) {
         throw ApiError.badGateway('Could not extract product details from this URL');
     }
 
-    const outcome = await productRepository.upsertFromProviderData(providerProduct);
+    const categorizedProducts = await normalizeCategories([providerProduct]);
+    const outcome = await productRepository.upsertFromProviderData(categorizedProducts[0]);
     return { product: outcome.product, priceChanged: outcome.priceChanged, isNew: outcome.isNew };
 }
 

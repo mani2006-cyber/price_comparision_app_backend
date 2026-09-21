@@ -14,6 +14,71 @@ const config = require('../config/env');
 
 const DEFAULT_PAGE = 1; // pagination always starts at 1 - not a tunable, unlike the limit below
 
+function filterByQuery(products, query) {
+    const tokens = String(query || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter(function(token) { return token.length > 1; });
+
+    if (tokens.length === 0) return products;
+
+    return products.filter(function(product) {
+        const fields = [
+            product.title,
+            product.brand,
+            product.category,
+            Array.isArray(product.categoryPath) ? product.categoryPath.join(' ') : '',
+            Array.isArray(product.keywords) ? product.keywords.join(' ') : '',
+        ].filter(Boolean);
+
+        // Keep legacy/incomplete records visible until they have enough
+        // product text to make a relevance decision.
+        if (fields.length === 0) return true;
+
+        const searchable = fields.join(' ').toLowerCase();
+        return tokens.every(function(token) { return searchable.indexOf(token) !== -1; });
+    });
+}
+
+function filterProducts(products, filters) {
+    const options = filters || {};
+    const category = options.category && options.category.toLowerCase();
+    const brand = options.brand && options.brand.toLowerCase();
+    const marketplace = options.marketplace && options.marketplace.toLowerCase();
+
+    return products.filter(function(product) {
+        if (category) {
+            const categoryValues = [product.category].concat(
+                Array.isArray(product.categoryPath) ? product.categoryPath : []
+            ).filter(Boolean);
+            const categoryMatches = categoryValues.some(function(value) {
+                return String(value).toLowerCase().indexOf(category) !== -1;
+            });
+            if (!categoryMatches) return false;
+        }
+
+        if (brand && String(product.brand || '').toLowerCase().indexOf(brand) === -1) {
+            return false;
+        }
+
+        if (marketplace && String(product.marketplace || '').toLowerCase() !== marketplace) {
+            return false;
+        }
+
+        if (options.minPrice !== undefined && product.currentPrice < options.minPrice) {
+            return false;
+        }
+
+        if (options.maxPrice !== undefined && product.currentPrice > options.maxPrice) {
+            return false;
+        }
+
+        return true;
+    });
+}
+
 // ── Sorting ──────────────────────────────────────────────────────────
 // Deliberately a small, separate, pure function - NOT inlined into
 // runSearch below. The old codebase had a sort bug that silently no-op'd
@@ -52,7 +117,9 @@ function getSortedProducts(products, sortBy) {
 async function runSearch(query, userId, options) {
     const searchResult = await productService.searchAndPersist(query, options);
 
-    const sorted = getSortedProducts(searchResult.products, options && options.sortBy);
+    const relevant = filterByQuery(searchResult.products, query);
+    const filtered = filterProducts(relevant, options);
+    const sorted = getSortedProducts(filtered, options && options.sortBy);
 
     // Recorded against the TOTAL count across every page, not just
     // whichever page was requested - "how many results did this search
@@ -100,6 +167,7 @@ async function deleteSearchHistoryItem(entryId, userId) {
 module.exports = {
     runSearch,
     getSortedProducts,
+    filterProducts,
     getSearchHistory,
     deleteSearchHistoryItem,
 };

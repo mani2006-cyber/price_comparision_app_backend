@@ -108,6 +108,15 @@ describe('GET /api/search', function() {
         );
     });
 
+    it('returns 400 for an invalid or negative price filter', async function() {
+        const invalid = await request(app).get('/api/search').query({ q: 'laptop', minPrice: 'not-a-price' });
+        const negative = await request(app).get('/api/search').query({ q: 'laptop', maxPrice: -1 });
+
+        expect(invalid.status).toBe(400);
+        expect(negative.status).toBe(400);
+        expect(adapters.searchAllMarketplaces).not.toHaveBeenCalled();
+    });
+
     it('accepts a valid sortBy and passes the trimmed q through to the adapters', async function() {
         adapters.searchAllMarketplaces.mockResolvedValue({ results: [fakeProduct()], failures: [] });
 
