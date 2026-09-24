@@ -81,17 +81,33 @@ function buildKeywords(title) {
         .slice(0, 20);
 }
 
+function extractCategoryPath(value) {
+    if (Array.isArray(value)) {
+        return value.map(function(item) {
+            return typeof item === 'string' ? item : item && (item.name || item.title);
+        }).filter(Boolean);
+    }
+    if (typeof value === 'string') {
+        return value.split(/[>\\/]/).map(function(item) { return item.trim(); }).filter(Boolean);
+    }
+    return [];
+}
+
 // ── Mapping: a single /search result item -> ProviderProduct ──────────
 
 function mapSearchItem(item) {
     const currentPrice = parsePrice(item.product_price);
     if (currentPrice === null) return null; // no usable price - skip, same as the old scraper's rule
 
+    const categoryPath = extractCategoryPath(item.category_path || item.category || item.product_category);
+
     return withDefaults({
         marketplace: 'amazon',
         externalId: item.asin,
         title: item.product_title,
         brand: extractBrand(null, item.product_title),
+        category: categoryPath.length > 0 ? categoryPath[categoryPath.length - 1] : null,
+        categoryPath,
         images: item.product_photo ? [item.product_photo] : [],
         currentPrice,
         originalPrice: parsePrice(item.product_original_price),

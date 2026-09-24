@@ -210,6 +210,13 @@ function buildKeywords(title) {
         .slice(0, 20);
 }
 
+function extractBreadcrumb($) {
+    return $('#wayfinding-breadcrumbs_container li a, #wayfinding-breadcrumbs_feature_div li a')
+        .map(function() { return cleanText($(this).text()); })
+        .get()
+        .filter(Boolean);
+}
+
 // ── Search page parsing ─────────────────────────────────────────────
 
 function parseSearchResults(html) {
@@ -313,11 +320,15 @@ function parseProductDetail(html, productUrl) {
     const asin = extractAsinFromUrl(productUrl);
     if (!asin) return null;
 
+    const categoryPath = extractBreadcrumb($);
+
     return withDefaults({
         marketplace: 'amazon',
         externalId: asin,
         title,
         brand,
+        category: categoryPath.length > 0 ? categoryPath[categoryPath.length - 1] : null,
+        categoryPath,
         images: images.slice(0, config.product.maxImages),
         currentPrice,
         currency: 'INR',

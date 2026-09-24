@@ -131,6 +131,6 @@ describe('searchAndPersist caching', function() {
 
         await productService.searchAndPersist('iphone 16');
 
-        expect(cache.getOrSet).toHaveBeenCalledWith('search:iphone 16', config.cacheTtl.search, expect.any(Function));
+        expect(cache.getOrSet).toHaveBeenCalledWith('search:v2:iphone 16', config.cacheTtl.search, expect.any(Function));
     });
 });

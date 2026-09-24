@@ -80,7 +80,11 @@ function getSortedProducts(products, sortBy) {
 async function runSearch(query, userId, options) {
     const searchResult = await productService.searchAndPersist(query, options);
 
-    const relevant = filterByQuery(searchResult.products, query);
+    const filtered = filterByQuery(searchResult.products, query);
+    // Marketplace adapters already searched for this query. If their title
+    // or category wording differs from the query, do not turn valid results
+    // into an empty frontend response.
+    const relevant = filtered.length > 0 ? filtered : searchResult.products;
     const sorted = getSortedProducts(relevant, options && options.sortBy);
 
     // Recorded against the TOTAL count across every page, not just

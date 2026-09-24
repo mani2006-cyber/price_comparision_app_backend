@@ -81,6 +81,13 @@ function absoluteUrl(href) {
     return href.startsWith('http') ? href : BASE + href;
 }
 
+function extractBreadcrumb($) {
+    return $('nav a, ._1MR4o5 a, [class*="breadcrumb"] a')
+        .map(function() { return $(this).text().replace(/\\s+/g, ' ').trim(); })
+        .get()
+        .filter(function(value) { return value && value.toLowerCase() !== 'home'; });
+}
+
 // ── Search page parsing ─────────────────────────────────────────────
 
 function parseSearchResults(html) {
@@ -104,6 +111,7 @@ function parseSearchResults(html) {
 
         const relativeUrl = el.find('a.k7wcnx').first().attr('href') || '';
         const productUrl = absoluteUrl(relativeUrl.split('&')[0]);
+        if (!productUrl || productUrl === BASE) continue;
 
         // The card's own data-id attribute IS the real pid (confirmed live -
         // matches the ?pid= query param on its own href exactly, when
@@ -227,12 +235,15 @@ function parseProductDetail(html, productUrl) {
     if (!pid) return null;
 
     const brand = title.split(' ')[0];
+    const categoryPath = extractBreadcrumb($);
 
     return withDefaults({
         marketplace: 'flipkart',
         externalId: pid,
         title,
         brand,
+        category: categoryPath.length > 0 ? categoryPath[categoryPath.length - 1] : null,
+        categoryPath,
         images: extractGalleryImages($),
         currentPrice: price,
         currency: 'INR',

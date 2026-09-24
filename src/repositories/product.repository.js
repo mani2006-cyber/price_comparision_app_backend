@@ -92,6 +92,16 @@ async function upsertFromProviderData(providerData, session) {
 
     const update = Object.assign({}, providerData, { lastCheckedAt: now });
 
+    // Search cards often do not expose a breadcrumb. Do not erase a category
+    // obtained earlier from a product-detail response in that case.
+    if (!providerData.category && existing.category) {
+        update.category = existing.category;
+    }
+    if ((!Array.isArray(providerData.categoryPath) || providerData.categoryPath.length === 0) &&
+        Array.isArray(existing.categoryPath) && existing.categoryPath.length > 0) {
+        update.categoryPath = existing.categoryPath;
+    }
+
     // findByIdAndUpdate below is a QUERY-level operation - it does NOT run
     // Product.model.js's pre('save') hook, where discountPercentage
     // normally gets auto-computed. Without this, every update after the
