@@ -211,10 +211,32 @@ function buildKeywords(title) {
 }
 
 function extractBreadcrumb($) {
-    return $('#wayfinding-breadcrumbs_container li a, #wayfinding-breadcrumbs_feature_div li a')
+    return $('#wayfinding-breadcrumbs_container li a, #wayfinding-breadcrumbs_feature_div li a, ' +
+        '#desktop-breadcrumbs_feature_div li a, #desktop-breadcrumbs li a')
         .map(function() { return cleanText($(this).text()); })
         .get()
         .filter(Boolean);
+}
+
+async function enrichSearchResultCategory(product) {
+    if (!product.rawUrl) return product;
+
+    try {
+        const html = await fetchHtml(product.rawUrl, BASE);
+        const categoryPath = extractBreadcrumb(cheerio.load(html));
+        if (categoryPath.length === 0) return product;
+
+        return Object.assign({}, product, {
+            category: categoryPath[categoryPath.length - 1],
+            categoryPath,
+        });
+    } catch (err) {
+        logger.warn('Amazon scraper: category enrichment failed, keeping search result', {
+            url: product.rawUrl,
+            message: err.message,
+        });
+        return product;
+    }
 }
 
 // ── Search page parsing ─────────────────────────────────────────────
@@ -357,9 +379,10 @@ async function searchByQuery(query) {
     }
 
     const results = parseSearchResults(html);
-    logger.info('Amazon scraper search finished', { query, count: results.length });
+    const enrichedResults = await Promise.all(results.map(enrichSearchResultCategory));
+    logger.info('Amazon scraper search finished', { query, count: enrichedResults.length });
 
-    return validateProviderProductList(results);
+    return validateProviderProductList(enrichedResults);
 }
 
 async function searchByLink(url) {

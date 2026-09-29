@@ -49,7 +49,7 @@ async function start() {
         return; // explicit, not just relying on process.exit()'s real-process termination - keeps this function correct even where exit is mocked/intercepted (e.g. under test)
     }
 
-    server = app.listen(config.port, function() {
+    server = app.listen(config.port, "0.0.0.0", function() {
         logger.info('Server started', { port: config.port, env: config.env });
 
         // Started after the HTTP server is up, not before - the refresher

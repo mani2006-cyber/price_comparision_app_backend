@@ -163,7 +163,7 @@ describe('GET /api/search', function() {
         expect(historyRes.body.history[0].searchCount).toBe(2); // ...but both searches were counted
     });
 
-    describe('pagination', function() {
+    describe('complete result set', function() {
         function manyResults(count) {
             const results = [];
             for (let i = 0; i < count; i++) {
@@ -172,38 +172,17 @@ describe('GET /api/search', function() {
             return results;
         }
 
-        it('returns page 1 with the default limit, plus pagination metadata, when unspecified', async function() {
+        it('returns all results without pagination metadata', async function() {
             adapters.searchAllMarketplaces.mockResolvedValue({ results: manyResults(30), failures: [] });
 
             const res = await request(app).get('/api/search').query({ q: 'laptop' });
 
             expect(res.status).toBe(200);
-            expect(res.body.page).toBe(1);
-            expect(res.body.limit).toBe(config.search.defaultLimit);
-            expect(res.body.products).toHaveLength(config.search.defaultLimit);
-            expect(res.body.resultCount).toBe(30); // total, not just this page
-            expect(res.body.totalPages).toBe(Math.ceil(30 / config.search.defaultLimit));
-        });
-
-        it('respects explicit page/limit query params', async function() {
-            adapters.searchAllMarketplaces.mockResolvedValue({ results: manyResults(25), failures: [] });
-
-            const res = await request(app).get('/api/search').query({ q: 'laptop', page: 2, limit: 10 });
-
-            expect(res.status).toBe(200);
-            expect(res.body.products).toHaveLength(10);
-            expect(res.body.page).toBe(2);
-            expect(res.body.totalPages).toBe(3);
-        });
-
-        it('rejects a limit above the configured cap with a 400', async function() {
-            const res = await request(app).get('/api/search').query({ q: 'laptop', limit: 999 });
-            expect(res.status).toBe(400);
-        });
-
-        it('rejects page=0 with a 400', async function() {
-            const res = await request(app).get('/api/search').query({ q: 'laptop', page: 0 });
-            expect(res.status).toBe(400);
+            expect(res.body.products).toHaveLength(30);
+            expect(res.body.resultCount).toBe(30);
+            expect(res.body.page).toBeUndefined();
+            expect(res.body.limit).toBeUndefined();
+            expect(res.body.totalPages).toBeUndefined();
         });
     });
 });

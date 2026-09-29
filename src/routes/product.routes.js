@@ -17,8 +17,7 @@
 // would freeze whichever page got requested first and serve that exact
 // page to everyone for the rest of the TTL. Caching one layer down
 // means the expensive part (the live search, the AI summary call) is
-// still shared/cached, while whatever runs on top of it (history
-// recording, pagination) is always fresh per request.
+// still shared/cached, while history recording is always fresh per request.
 
 'use strict';
 

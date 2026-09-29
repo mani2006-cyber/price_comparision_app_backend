@@ -54,18 +54,7 @@ const LOCALHOST_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 const PRIVATE_LAN_ORIGIN_RE =
     /^https?:\/\/(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(:\d+)?$/;
 
-// NOTE: a bare `app.use(cors())` does NOT work for this app, even though it
-// looks more permissive. With no options the cors package replies
-// `Access-Control-Allow-Origin: *` and omits `Access-Control-Allow-Credentials`
-// - and per the CORS spec a browser REJECTS a wildcard origin outright for any
-// request made with `credentials: 'include'` ("...must not be the wildcard '*'
-// when the request's credentials mode is 'include'"). Every auth call from the
-// frontend uses credentials: 'include' to carry the refresh-token cookie, so a
-// bare cors() breaks signup/login/refresh with "Failed to fetch" on desktop and
-// phone alike. Reflecting the specific origin + credentials: true, as below, is
-// the only configuration that works here.
-
-app.use(cors({
+const corsOptions = {
     origin: function(origin, callback) {
         // No Origin header at all (curl, server-to-server, same-origin) -
         // nothing to check against, always allow.
@@ -79,7 +68,9 @@ app.use(cors({
         return callback(new Error('Not allowed by CORS: ' + origin));
     },
     credentials: true,
-}));
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(cookieParser());
 
