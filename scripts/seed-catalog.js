@@ -1,8 +1,7 @@
 // scripts/seed-catalog.js
 //
-// Seeds the admin-curated catalog (AdminProduct) that backs
-// GET /api/categories - see catalog-seed-data.js for the entries and why
-// they look the way they do.
+// Seeds the admin-curated catalog (AdminProduct) that backs GET /api/categories
+// with a small sample from each category in DummyJSON.
 //
 //   npm run seed:catalog              add anything missing, leave the rest alone
 //   npm run seed:catalog -- --reset   delete the whole catalog first
@@ -29,10 +28,66 @@ const { connectDB, disconnectDB } = require('../src/config/db');
 const { disconnectRedis } = require('../src/config/redis');
 const AdminProduct = require('../src/models/AdminProduct.model');
 const adminProductRepository = require('../src/repositories/adminProduct.repository');
-const { CATALOG_SEED } = require('./catalog-seed-data');
+
+const DUMMYJSON_CATEGORIES_URL = 'https://dummyjson.com/products/categories';
+const MIN_PRODUCTS_PER_CATEGORY = 20;
+const DEMO_USD_TO_INR = 85;
+
+async function fetchDummyCatalog() {
+    const categoriesResponse = await fetch(DUMMYJSON_CATEGORIES_URL);
+    if (!categoriesResponse.ok) {
+        throw new Error('DummyJSON categories request failed with status ' + categoriesResponse.status);
+    }
+
+    const categories = await categoriesResponse.json();
+    if (!Array.isArray(categories)) {
+        throw new Error('DummyJSON categories response was not an array');
+    }
+
+    const categoryProducts = await Promise.all(categories.map(async function(category) {
+        const productsUrl = new URL(category.url);
+        productsUrl.searchParams.set('limit', '0');
+
+        const productsResponse = await fetch(productsUrl);
+        if (!productsResponse.ok) {
+            throw new Error('DummyJSON products request failed for ' + category.slug + ' with status ' + productsResponse.status);
+        }
+
+        const payload = await productsResponse.json();
+        const sourceProducts = payload.products || [];
+        if (sourceProducts.length === 0) {
+            throw new Error('DummyJSON returned no products for ' + category.slug);
+        }
+
+        const entries = sourceProducts.map(function(product) {
+            return {
+                title: product.title,
+                description: product.description || null,
+                category: category.name,
+                // AdminProduct's display price is treated as INR by the catalog UI.
+                price: Math.round(product.price * DEMO_USD_TO_INR),
+                image: product.thumbnail || (product.images && product.images[0]) || null,
+                status: 'active',
+            };
+        });
+
+        for (let index = 0; entries.length < MIN_PRODUCTS_PER_CATEGORY; index++) {
+            const source = entries[index % sourceProducts.length];
+            entries.push({
+                ...source,
+                title: source.title + ' (Demo ' + (entries.length + 1) + ')',
+            });
+        }
+
+        return entries;
+    }));
+
+    return categoryProducts.flat();
+}
 
 async function main() {
     const reset = process.argv.includes('--reset');
+    const catalogSeed = await fetchDummyCatalog();
 
     await connectDB();
     console.log('Connected to ' + mongoose.connection.name);
@@ -54,7 +109,7 @@ async function main() {
     let skipped = 0;
     const perCategory = new Map();
 
-    for (const entry of CATALOG_SEED) {
+    for (const entry of catalogSeed) {
         const key = entry.title.trim().toLowerCase() + ' ' + entry.category.trim().toLowerCase();
         if (seen.has(key)) {
             skipped++;
@@ -77,6 +132,7 @@ async function main() {
 
     console.log('');
     console.log('Created ' + created + ', skipped ' + skipped + ' (already present)');
+    console.log('Fetched ' + catalogSeed.length + ' products from DummyJSON');
     if (perCategory.size > 0) {
         console.log('');
         for (const [category, count] of perCategory) {
