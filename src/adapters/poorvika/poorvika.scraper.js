@@ -212,8 +212,9 @@ function resolveTitle(product) {
 
 function resolvePrice(offers) {
     const concreteOffer = offers && offers.offers && offers.offers[0];
-    if (!concreteOffer || concreteOffer.price === undefined) return null;
-    return toNum(concreteOffer.price);
+    const price = concreteOffer ? concreteOffer.price : offers && offers.price;
+    if (price === undefined) return null;
+    return toNum(price);
 }
 
 function resolveMrp(offers, price) {

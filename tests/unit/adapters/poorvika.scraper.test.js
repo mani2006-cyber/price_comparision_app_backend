@@ -277,6 +277,31 @@ describe('searchByLink', function() {
         expect(result.originalPrice).toBe(79900); // highPrice IS used as MRP, just not as the selling price
     });
 
+    it('parses a direct Offer price used by current Poorvika product pages', async function() {
+      const html = '<html><head>' + jsonLdScript({
+        '@type': 'Product',
+        name: 'Universal Screen Protector For 15.6 inch Laptop ( Transparent )',
+        sku: 'PMACT105',
+        offers: {
+          '@type': 'Offer',
+          price: 799,
+          priceCurrency: 'INR',
+          availability: 'https://schema.org/InStock',
+        },
+      }) + '</head><body></body></html>';
+      axios.get.mockResolvedValue({ data: html });
+
+      const result = await poorvika.searchByLink(
+        'https://www.poorvika.com/universal-screen-protector-for-15-6-inch-laptop-transparent/p'
+      );
+
+      expect(result.title).toBe('Universal Screen Protector For 15.6 inch Laptop ( Transparent )');
+      expect(result.sku).toBe('PMACT105');
+      expect(result.currentPrice).toBe(799);
+      expect(result.originalPrice).toBeNull();
+      expect(result.currency).toBe('INR');
+    });
+
     it('does not report an MRP that is not actually greater than the selling price', async function() {
         const html = productPageHtml({
             offers: {
