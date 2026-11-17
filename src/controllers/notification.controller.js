@@ -44,6 +44,11 @@ async function markAllAsRead(req, res) {
     res.status(200).json({ success: true, modifiedCount: result.modifiedCount });
 }
 
+async function deleteNotification(req, res) {
+    await notificationService.deleteNotification(req.params.id, req.userId);
+    res.status(200).json({ success: true, message: 'Notification deleted' });
+}
+
 // ── Real-time push (SSE) ─────────────────────────────────────────────
 //
 // GET /api/notifications/stream - opens a Server-Sent Events connection
@@ -99,4 +104,4 @@ function stream(req, res) {
     logger.debug('Notification stream opened', { userId: req.userId });
 }
 
-module.exports = { getInbox, markAsRead, markAllAsRead, stream };
+module.exports = { getInbox, markAsRead, markAllAsRead, deleteNotification, stream };

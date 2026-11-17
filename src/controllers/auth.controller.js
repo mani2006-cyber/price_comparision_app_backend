@@ -127,7 +127,7 @@ async function refresh(req, res) {
 async function logout(req, res) {
     const rawRefreshToken = req.cookies ? req.cookies[config.cookie.refreshCookieName] : null;
 
-    await authService.logout(rawRefreshToken);
+    await authService.logout(rawRefreshToken, getRequestMeta(req));
     clearRefreshCookie(res);
 
     res.status(200).json({ success: true, message: 'Logged out' });

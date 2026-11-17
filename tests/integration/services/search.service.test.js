@@ -137,16 +137,37 @@ describe('runSearch - complete result set', function() {
         return products;
     }
 
-    it('returns every matching product without pagination metadata', async function() {
+    it('returns the default page and pagination metadata for the complete result set', async function() {
         productService.searchAndPersist.mockResolvedValue({ products: fakeProducts(30), marketplaceFailures: [] });
 
         const result = await searchService.runSearch('laptop', null);
 
-        expect(result.products).toHaveLength(30);
+        expect(result.products).toHaveLength(20);
         expect(result.total).toBe(30);
-        expect(result.page).toBeUndefined();
-        expect(result.limit).toBeUndefined();
-        expect(result.totalPages).toBeUndefined();
+        expect(result.page).toBe(1);
+        expect(result.limit).toBe(20);
+        expect(result.totalPages).toBe(2);
+    });
+
+    it('sorts the complete result set before returning the requested page', async function() {
+        productService.searchAndPersist.mockResolvedValue({ products: fakeProducts(30), marketplaceFailures: [] });
+
+        const result = await searchService.runSearch('laptop', null, {
+            sortBy: 'price_desc',
+            page: 2,
+            limit: 10,
+        });
+
+        expect(result.products.map(function(product) { return product.currentPrice; }))
+            .toEqual([19, 18, 17, 16, 15, 14, 13, 12, 11, 10]);
+        expect(result.total).toBe(30);
+        expect(result.page).toBe(2);
+        expect(result.limit).toBe(10);
+        expect(result.totalPages).toBe(3);
+        expect(productService.searchAndPersist).toHaveBeenCalledWith('laptop', {
+            sortBy: 'price_desc',
+            platform: undefined,
+        });
     });
 
     it('keeps all marketplace results when some titles do not literally contain the query', async function() {
@@ -156,9 +177,11 @@ describe('runSearch - complete result set', function() {
         }
         productService.searchAndPersist.mockResolvedValue({ products, marketplaceFailures: [] });
 
-        const result = await searchService.runSearch('laptop', null);
+        const result = await searchService.runSearch('laptop', null, { page: 2, limit: 10 });
 
-        expect(result.products).toHaveLength(24);
+        expect(result.total).toBe(24);
+        expect(result.products).toHaveLength(10);
+        expect(result.products.some(function(product) { return product.title.indexOf('Notebook computer') === 0; })).toBe(true);
     });
 
     it('records search history against the TOTAL count, not the page size', async function() {

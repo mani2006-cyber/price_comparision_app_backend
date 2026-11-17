@@ -127,6 +127,15 @@ See `.env.example` for the full list with defaults. The ones worth knowing about
 | `SSE_HEARTBEAT_MS` | How often the notification stream (`GET /notifications/stream`) writes a keepalive ping. |
 | `OPENROUTER_API_KEY` | Optional. Powers `result.aiSummary` on `POST /compare-url` — see that route's own notes above. Unset = feature silently disabled, nothing else affected. |
 | `OPENROUTER_MODEL` / `OPENROUTER_MAX_TOKENS` / `OPENROUTER_TEMPERATURE` | Which model to use for the summary (defaults to the free `nvidia/nemotron-3-ultra-550b-a55b:free`), and its generation parameters. |
+| `LOG_TO_FILE` | Enables persistent JSON logs (default `true`; automatically defaults to `false` in tests). Console logging remains enabled either way. |
+| `LOG_DIRECTORY` | Directory for persistent logs (default `logs/`, relative to the working directory). |
+| `LOG_MAX_FILE_SIZE_BYTES` / `LOG_RETENTION_FILES` | Maximum size of each active log (default 10 MiB) and number of rotated backups to retain per log (default 5). |
+
+### Persistent logs and traffic monitoring
+
+Pino continues to write application logs to the console. Unless `LOG_TO_FILE=false` (or `NODE_ENV=test` without an explicit override), it also writes structured JSON lines to `logs/application.log`, `logs/error.log`, `logs/security.log`, and `logs/access.log`. Each file rotates when it reaches `LOG_MAX_FILE_SIZE_BYTES`; numbered backups up to `LOG_RETENTION_FILES` are retained. The logs directory is created automatically. File-write failures are reported to stderr and do not fail API requests.
+
+`access.log` records inbound request method, normalized endpoint, status, response time, source IP, and request ID. `application.log` also records outbound Axios and Fetch request destinations, methods, statuses, and durations. Authentication audit events are written to `security.log`; errors at error severity and above are copied to `error.log`. Request bodies, query strings, credentials, cookies, tokens, API keys, and common personal-information fields are excluded or redacted. Source IPs are retained in access/security events for operational monitoring.
 
 ## API reference
 
@@ -242,6 +251,7 @@ When an alert's target price is met (checked by the background price-refresher �
 | GET | `/` | 🔒 | `?limit=` | `200` `{ success, unreadCount, notifications }` (cached — see [Caching](#caching)) |
 | POST | `/:id/read` | 🔒 | — | `200` `{ success, notification }` or `404` |
 | POST | `/read-all` | 🔒 | — | `200` `{ success, modifiedCount }` |
+| DELETE | `/:id` | 🔒 | — | `200` `{ success, message }` or `404` |
 
 ## Real-time notifications (SSE)
 

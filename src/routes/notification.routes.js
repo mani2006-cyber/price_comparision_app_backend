@@ -46,5 +46,6 @@ router.use(requireAuth); // applies to every route below
 router.get('/', notificationCache, asyncHandler(notificationController.getInbox));
 router.post('/:id/read', asyncHandler(notificationController.markAsRead));
 router.post('/read-all', asyncHandler(notificationController.markAllAsRead));
+router.delete('/:id', asyncHandler(notificationController.deleteNotification));
 
 module.exports = router;

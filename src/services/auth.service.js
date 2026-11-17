@@ -63,6 +63,11 @@ async function signup(name, email, password, meta) {
 
     const user = await userRepository.create({ name, email, password });
     const tokens = await issueTokenPair(user._id, meta);
+    logger.security('Account created', {
+        userId: user._id.toString(),
+        sourceIp: meta && meta.ip,
+        outcome: 'success',
+    });
 
     return { user, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken };
 }
@@ -72,15 +77,30 @@ async function login(email, password, meta) {
     const user = await userRepository.findByEmailWithPassword(email);
 
     if (!user) {
+        logger.security('Authentication failed', {
+            sourceIp: meta && meta.ip,
+            reason: 'invalid_credentials',
+            outcome: 'failure',
+        }, 'warn');
         throw ApiError.unauthorized('Invalid email or password');
     }
 
     const passwordMatches = await user.comparePassword(password);
     if (!passwordMatches) {
+        logger.security('Authentication failed', {
+            sourceIp: meta && meta.ip,
+            reason: 'invalid_credentials',
+            outcome: 'failure',
+        }, 'warn');
         throw ApiError.unauthorized('Invalid email or password');
     }
 
     const tokens = await issueTokenPair(user._id, meta);
+    logger.security('Authentication succeeded', {
+        userId: user._id.toString(),
+        sourceIp: meta && meta.ip,
+        outcome: 'success',
+    });
 
     return { user, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken };
 }
@@ -88,6 +108,11 @@ async function login(email, password, meta) {
 // ── Refresh ──────────────────────────────────────────────────────────
 async function refreshAccessToken(rawRefreshToken, meta) {
     if (!rawRefreshToken) {
+        logger.security('Refresh token rejected', {
+            sourceIp: meta && meta.ip,
+            reason: 'missing_token',
+            outcome: 'failure',
+        }, 'warn');
         throw ApiError.unauthorized('No refresh token provided');
     }
 
@@ -96,6 +121,11 @@ async function refreshAccessToken(rawRefreshToken, meta) {
     try {
         decoded = jwt.verify(rawRefreshToken, config.refreshToken.secret);
     } catch (err) {
+        logger.security('Refresh token rejected', {
+            sourceIp: meta && meta.ip,
+            reason: 'invalid_or_expired',
+            outcome: 'failure',
+        }, 'warn');
         throw ApiError.unauthorized('Invalid or expired refresh token');
     }
 
@@ -113,12 +143,19 @@ async function refreshAccessToken(rawRefreshToken, meta) {
             // theft, since the legitimate user's own next refresh already
             // moved past this one. Incident response: revoke EVERYTHING for
             // this user, forcing a fresh login on every device.
-            logger.warn('Refresh token reuse detected - revoking all sessions for user', {
+            logger.security('Refresh token reuse detected - revoking all sessions for user', {
                 userId: anyRecord.userId.toString(),
-            });
+                sourceIp: meta && meta.ip,
+                outcome: 'failure',
+            }, 'warn');
             await refreshTokenRepository.revokeAllForUser(anyRecord.userId);
         }
 
+        logger.security('Refresh token rejected', {
+            sourceIp: meta && meta.ip,
+            reason: 'not_active',
+            outcome: 'failure',
+        }, 'warn');
         throw ApiError.unauthorized('Invalid or expired refresh token');
     }
 
@@ -128,12 +165,17 @@ async function refreshAccessToken(rawRefreshToken, meta) {
     const newRefresh = generateRefreshToken(decoded.userId);
 
     await refreshTokenRepository.rotate(validRecord, newRefresh.token, newRefresh.expiresAt, meta);
+    logger.security('Refresh token rotated', {
+        userId: decoded.userId,
+        sourceIp: meta && meta.ip,
+        outcome: 'success',
+    });
 
     return { accessToken: newAccessToken, refreshToken: newRefresh.token };
 }
 
 // ── Logout ───────────────────────────────────────────────────────────
-async function logout(rawRefreshToken) {
+async function logout(rawRefreshToken, meta) {
     if (!rawRefreshToken) {
         return; // nothing to revoke - idempotent, not an error
     }
@@ -141,6 +183,11 @@ async function logout(rawRefreshToken) {
     const record = await refreshTokenRepository.findAnyByRawToken(rawRefreshToken);
     if (record && !record.revoked) {
         await refreshTokenRepository.revokeById(record._id);
+        logger.security('Session logged out', {
+            userId: record.userId.toString(),
+            sourceIp: meta && meta.ip,
+            outcome: 'success',
+        });
     }
     // If not found or already revoked, logout still "succeeds" silently -
     // the end state the caller wants (this token no longer works) is

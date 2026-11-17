@@ -139,6 +139,51 @@ describe('POST /api/notifications/read-all', function() {
     });
 });
 
+describe('DELETE /api/notifications/:id', function() {
+    it('deletes the caller-owned notification and invalidates their inbox cache', async function() {
+        const notification = await Notification.create({
+            userId: userA._id,
+            type: 'system',
+            title: 'A',
+            message: 'a',
+        });
+
+        const res = await request(app)
+            .delete('/api/notifications/' + notification._id)
+            .set('Authorization', 'Bearer ' + tokenA);
+
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ success: true, message: 'Notification deleted' });
+        expect(await Notification.findById(notification._id)).toBeNull();
+        expect(cache.del).toHaveBeenCalledWith('notifications:' + userA._id);
+    });
+
+    it('returns 404 and preserves a notification owned by another user', async function() {
+        const notification = await Notification.create({
+            userId: userA._id,
+            type: 'system',
+            title: 'A',
+            message: 'a',
+        });
+
+        const res = await request(app)
+            .delete('/api/notifications/' + notification._id)
+            .set('Authorization', 'Bearer ' + tokenB);
+
+        expect(res.status).toBe(404);
+        expect(await Notification.findById(notification._id)).not.toBeNull();
+        expect(cache.del).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 for a notification that does not exist', async function() {
+        const res = await request(app)
+            .delete('/api/notifications/000000000000000000000000')
+            .set('Authorization', 'Bearer ' + tokenA);
+
+        expect(res.status).toBe(404);
+    });
+});
+
 describe('GET /api/notifications caching', function() {
     it('sets X-Cache: MISS and stores the response on a cache miss', async function() {
         await Notification.create({ userId: userA._id, type: 'system', title: 'A', message: 'a' });

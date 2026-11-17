@@ -80,6 +80,13 @@ const config = {
     isProduction: getString('NODE_ENV', 'development') === 'production',
     port: getNumber('PORT', 5000),
 
+    logging: {
+        toFile: getString('LOG_TO_FILE', getString('NODE_ENV', 'development') !== 'test' ? 'true' : 'false') === 'true',
+        directory: getString('LOG_DIRECTORY', 'logs'),
+        maxFileSizeBytes: getNumber('LOG_MAX_FILE_SIZE_BYTES', 10 * 1024 * 1024),
+        retentionFiles: getNumber('LOG_RETENTION_FILES', 5),
+    },
+
     mongoUri: getRequiredString('MONGO_URI'),
 
     accessToken: {
@@ -229,6 +236,11 @@ const config = {
         maxLimit: getNumber('CATEGORY_MAX_LIMIT', 50),
     },
 
+    search: {
+        defaultLimit: getNumber('SEARCH_DEFAULT_LIMIT', 20),
+        maxLimit: getNumber('SEARCH_MAX_LIMIT', 50),
+    },
+
     // Gates every /api/admin/products/* route (adminAuth.middleware.js) -
     // a single shared secret, not per-user roles/accounts. Deliberately
     // NOT an "enabled: !!key" optional feature like openRouter above:
@@ -334,7 +346,30 @@ function validateTokenSecretsAreDistinct() {
     }
 }
 
+function validateLoggingConfig() {
+    if (!Number.isSafeInteger(config.logging.maxFileSizeBytes) || config.logging.maxFileSizeBytes <= 0) {
+        throw new Error('LOG_MAX_FILE_SIZE_BYTES must be a positive safe integer');
+    }
+    if (!Number.isSafeInteger(config.logging.retentionFiles) || config.logging.retentionFiles < 0) {
+        throw new Error('LOG_RETENTION_FILES must be a non-negative safe integer');
+    }
+}
+
+function validateSearchConfig() {
+    if (!Number.isSafeInteger(config.search.defaultLimit) || config.search.defaultLimit <= 0) {
+        throw new Error('SEARCH_DEFAULT_LIMIT must be a positive safe integer');
+    }
+    if (!Number.isSafeInteger(config.search.maxLimit) || config.search.maxLimit <= 0) {
+        throw new Error('SEARCH_MAX_LIMIT must be a positive safe integer');
+    }
+    if (config.search.defaultLimit > config.search.maxLimit) {
+        throw new Error('SEARCH_DEFAULT_LIMIT cannot exceed SEARCH_MAX_LIMIT');
+    }
+}
+
 validateProviderCredentials();
 validateTokenSecretsAreDistinct();
+validateLoggingConfig();
+validateSearchConfig();
 
 module.exports = config;

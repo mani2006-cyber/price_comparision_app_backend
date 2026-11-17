@@ -45,6 +45,7 @@ async function start() {
         // An app that "starts" but can't reach its database would accept
         // requests and fail every one of them - worse than not starting.
         logger.error('Failed to start: could not connect to MongoDB', err);
+        await logger.flush();
         process.exit(1);
         return; // explicit, not just relying on process.exit()'s real-process termination - keeps this function correct even where exit is mocked/intercepted (e.g. under test)
     }
@@ -73,7 +74,7 @@ function shutdown(signal) {
 
     if (!server) {
         clearTimeout(forceExitTimer);
-        process.exit(0);
+        logger.flush().then(function() { process.exit(0); });
         return;
     }
 
@@ -90,10 +91,12 @@ function shutdown(signal) {
             await disconnectRedis();
             clearTimeout(forceExitTimer);
             logger.info('Shutdown complete');
+            await logger.flush();
             process.exit(0);
         } catch (err) {
             logger.error('Error during shutdown', err);
             clearTimeout(forceExitTimer);
+            await logger.flush();
             process.exit(1);
         }
     });
@@ -123,12 +126,12 @@ if (require.main === module) {
     // correctly handle the vast majority of errors already ────────────
     process.on('unhandledRejection', function(reason) {
         logger.error('Unhandled promise rejection', reason instanceof Error ? reason : new Error(String(reason)));
-        process.exit(1);
+        logger.flush().finally(function() { process.exit(1); });
     });
 
     process.on('uncaughtException', function(err) {
         logger.error('Uncaught exception', err);
-        process.exit(1);
+        logger.flush().finally(function() { process.exit(1); });
     });
 
     start();

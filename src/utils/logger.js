@@ -1,71 +1,144 @@
-// src/utils/logger.js
-//
-// Centralized logger. Every other module logs through this file instead
-// of calling console.* or pino directly, so log format and behavior
-// (e.g. what happens in production) is controlled in exactly one place.
-// Backed by pino - every call site elsewhere in the app keeps using the
-// same info/warn/error/debug(message, data) shape this module always
-// exported, so switching the implementation here required zero changes
-// anywhere else.
-
 'use strict';
 
+const path = require('path');
 const pino = require('pino');
 const config = require('../config/env');
+const { RotatingFileStream, LogFileRouter } = require('./rotatingFileStream');
 
-// Pretty, colorized single-line output ONLY in real interactive
-// development (`npm run dev` / `npm start` locally) - NOT in 'test'.
-// pino-pretty runs its formatting in a worker thread; spinning that up
-// fresh per Jest test file (each test file is its own process) adds
-// real startup overhead and non-deterministic ordering with jest's own
-// output for no benefit, since nobody is reading test-run logs as a
-// human console stream the way they'd read a dev server's. Plain JSON
-// lines (pino's default) in 'test' and 'production' alike - fast, and
-// still exactly what a real log aggregator would want in production.
-const usePrettyTransport = config.env === 'development';
+const redactPaths = [
+    'password', '*.password', 'authorization', '*.authorization',
+    'cookie', '*.cookie', 'cookies', '*.cookies',
+    'token', '*.token', 'accessToken', '*.accessToken',
+    'refreshToken', '*.refreshToken', 'apiKey', '*.apiKey',
+    'adminApiKey', '*.adminApiKey', 'email', '*.email',
+    'phone', '*.phone', 'mobile', '*.mobile', 'address', '*.address',
+    'name', '*.name', 'firstName', '*.firstName', 'lastName', '*.lastName',
+    'dateOfBirth', '*.dateOfBirth', 'dob', '*.dob', 'secret', '*.secret',
+];
 
-const pinoLogger = pino({
-    // 'debug' everywhere except production, matching the previous
-    // module's own isProduction gate on debug() - now enforced by pino's
-    // level filtering itself instead of an if-check in this file.
+const loggerOptions = {
     level: config.isProduction ? 'info' : 'debug',
-    transport: usePrettyTransport ? {
+    timestamp: pino.stdTimeFunctions.isoTime,
+    redact: { paths: redactPaths, censor: '[REDACTED]' },
+};
+
+const usePrettyTransport = config.env === 'development';
+const pinoLogger = pino(Object.assign({}, loggerOptions, usePrettyTransport ? {
+    transport: {
         target: 'pino-pretty',
         options: { colorize: true, translateTime: 'SYS:standard', ignore: 'pid,hostname' },
-    } : undefined,
-});
+    },
+} : {}));
 
-// Errors don't serialize usefully by default (you get "{}" or a huge
-// noisy object with circular refs). Pull out just the useful bits -
-// same normalization the previous console-based implementation did, so
-// output shape callers already depend on (e.g. { message, stack }) is
-// unchanged.
+let fileLogger = null;
+let fileRouter = null;
+const fileStreams = [];
+if (config.logging && config.logging.toFile) {
+    const makeFileStream = function(fileName) {
+        const stream = new RotatingFileStream(
+            path.resolve(process.cwd(), config.logging.directory, fileName),
+            config.logging.maxFileSizeBytes,
+            config.logging.retentionFiles
+        );
+        fileStreams.push(stream);
+        return stream;
+    };
+
+    fileRouter = new LogFileRouter({
+        application: makeFileStream('application.log'),
+        error: makeFileStream('error.log'),
+        security: makeFileStream('security.log'),
+        access: makeFileStream('access.log'),
+    });
+    fileLogger = pino(loggerOptions, fileRouter);
+}
+
+function isSensitiveKey(key) {
+    const normalized = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+    return [
+        'password', 'passwd', 'pwd', 'authorization', 'cookie', 'cookies',
+        'token', 'accesstoken', 'refreshtoken', 'tokenhash', 'apikey',
+        'adminapikey', 'xapikey', 'xadminkey', 'rapidapikey', 'key',
+        'email', 'phone', 'mobile', 'address', 'name', 'username',
+        'firstname', 'lastname', 'dateofbirth', 'dob', 'secret', 'query',
+    ].indexOf(normalized) !== -1;
+}
+
+function sanitizeString(value) {
+    return value
+        .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]')
+        .replace(/\bBasic\s+[A-Za-z0-9+/=]+/gi, 'Basic [REDACTED]')
+        .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_JWT]')
+        .replace(/(https?:\/\/)[^/\s:@]+:[^/\s@]+@/gi, '$1[REDACTED]@')
+        .replace(/([?&][^=&\s]+)=([^&#\s]*)/g, '$1=[REDACTED]')
+        .replace(/\b(password|passwd|pwd|access[_-]?token|refresh[_-]?token|token|cookie|secret|(?:x-)?api[_-]?key|admin[_-]?key|email|phone|mobile|address|first[_-]?name|last[_-]?name)\s*[:=]\s*["']?[^"'\s,;]+/gi, '$1=[REDACTED]')
+        .replace(/\b(?:cookie|set-cookie)\s*:\s*[^\r\n]*/gi, 'Cookie: [REDACTED]')
+        .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[REDACTED_EMAIL]')
+        .replace(/\b(x-api-key|x-admin-key|rapidapi-key|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]');
+}
+
+function sanitizeValue(value, seen) {
+    if (typeof value === 'string') {
+        return sanitizeString(value);
+    }
+    if (value === null || typeof value !== 'object') {
+        return value;
+    }
+    if (value instanceof Date) {
+        return value.toISOString();
+    }
+    if (value instanceof Error) {
+        return {
+            message: sanitizeString(value.message),
+            stack: typeof value.stack === 'string' ? sanitizeString(value.stack) : value.stack,
+        };
+    }
+    if (seen.has(value)) {
+        return '[Circular]';
+    }
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+        return value.map(function(item) {
+            return sanitizeValue(item, seen);
+        });
+    }
+
+    const sanitized = {};
+    Object.keys(value).forEach(function(key) {
+        sanitized[key] = isSensitiveKey(key) ? '[REDACTED]' : sanitizeValue(value[key], seen);
+    });
+    return sanitized;
+}
+
 function normalizeMetadata(data) {
     if (data === undefined || data === null) {
         return undefined;
     }
-
-    if (data instanceof Error) {
-        return { message: data.message, stack: data.stack };
-    }
-
-    // If metadata contains an Error nested inside (a common pattern:
-    // logger.error("X failed", { message: err.message })), leave it as-is —
-    // callers already extract what they need in that case.
-    return data;
+    return sanitizeValue(data, new WeakSet());
 }
 
-// pino's call shape is (mergingObject, message) - metadata first,
-// message second, the reverse of this module's own (message, data)
-// contract - so every level function here just flips the argument
-// order rather than changing every call site across the app.
-function write(pinoMethod, message, data) {
+function buildMetadata(data, eventType) {
     const meta = normalizeMetadata(data);
+    if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
+        return Object.assign({}, meta, { eventType: eventType });
+    }
+    if (meta === undefined) {
+        return { eventType: eventType };
+    }
+    return { eventType: eventType, data: meta };
+}
 
-    if (meta !== undefined) {
-        pinoMethod.call(pinoLogger, meta, message);
-    } else {
-        pinoMethod.call(pinoLogger, message);
+function write(pinoMethod, message, data, eventType) {
+    const metadata = buildMetadata(data, eventType || 'application');
+    pinoMethod.call(pinoLogger, metadata, sanitizeString(String(message)));
+    if (fileLogger) {
+        fileLogger[pinoMethod === pinoLogger.error ? 'error' :
+            pinoMethod === pinoLogger.warn ? 'warn' :
+                pinoMethod === pinoLogger.debug ? 'debug' : 'info'](
+            metadata,
+            sanitizeString(String(message))
+        );
     }
 }
 
@@ -78,15 +151,48 @@ function warn(message, data) {
 }
 
 function error(message, data) {
-    write(pinoLogger.error, message, data);
+    write(pinoLogger.error, message, data, 'error');
 }
 
-// Silent unless NODE_ENV !== 'production' - enforced by pinoLogger's own
-// level above, not a manual check here anymore. Use this for noisy,
-// investigation-only logs (e.g. "cache miss for key X") that would just
-// be clutter in a production log stream.
 function debug(message, data) {
     write(pinoLogger.debug, message, data);
 }
 
-module.exports = { info, warn, error, debug };
+function security(message, data, level) {
+    const method = level === 'error' ? pinoLogger.error : level === 'warn' ? pinoLogger.warn : pinoLogger.info;
+    write(method, message, data, 'security');
+}
+
+function access(message, data) {
+    write(pinoLogger.info, message, data, 'access');
+}
+
+function network(message, data, level) {
+    const method = level === 'error' ? pinoLogger.error : level === 'warn' ? pinoLogger.warn : pinoLogger.info;
+    write(method, message, data, 'network');
+}
+
+function flush() {
+    if (!fileRouter) {
+        return Promise.resolve();
+    }
+
+    return new Promise(function(resolve) {
+        if (fileRouter.writableFinished) {
+            resolve();
+        } else {
+            fileRouter.end(resolve);
+        }
+    }).then(function() {
+        return Promise.all(fileStreams.map(function(stream) {
+            if (stream.writableFinished) {
+                return Promise.resolve();
+            }
+            return new Promise(function(resolve) {
+                stream.end(resolve);
+            });
+        }));
+    });
+}
+
+module.exports = { info, warn, error, debug, security, access, network, flush };

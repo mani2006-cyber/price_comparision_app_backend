@@ -78,8 +78,8 @@ function loadServer(options) {
     deps.disconnectDB.mockResolvedValue(undefined);
     deps.disconnectRedis.mockResolvedValue(undefined);
     deps.notificationBus.close.mockResolvedValue(undefined);
-    deps.app.listen.mockImplementation(function(port, cb) {
-        if (cb) cb();
+    deps.app.listen.mockImplementation(function(port, host, cb) {
+        if (typeof cb === 'function') cb();
         return mockServerInstance();
     });
 
@@ -103,7 +103,7 @@ describe('start()', function() {
         await server.start();
 
         expect(deps.connectDB).toHaveBeenCalledTimes(1);
-        expect(deps.app.listen).toHaveBeenCalledWith(deps.config.port, expect.any(Function));
+        expect(deps.app.listen).toHaveBeenCalledWith(deps.config.port, '0.0.0.0', expect.any(Function));
     });
 
     it('exits with code 1 and never calls app.listen when connectDB fails', async function() {
@@ -152,10 +152,11 @@ describe('shutdown()', function() {
         expect(deps.disconnectDB).toHaveBeenCalledTimes(1);
     });
 
-    it('exits 0 immediately, without touching Mongo/Redis, when called before the server ever started', function() {
+    it('exits 0 after flushing logs, without touching Mongo/Redis, when called before the server ever started', async function() {
         const { server, deps } = loadServer(); // start() never called on this instance
 
         server.shutdown('SIGTERM');
+        await new Promise(function(resolve) { setImmediate(resolve); });
 
         expect(processExitSpy).toHaveBeenCalledWith(0);
         expect(deps.disconnectDB).not.toHaveBeenCalled();
@@ -177,8 +178,8 @@ describe('shutdown()', function() {
         const { server, deps } = loadServer({ redisEnabled: true });
         // server.close() never invokes its callback this time - simulates a
         // hung in-flight request that never finishes.
-        deps.app.listen.mockImplementation(function(port, cb) {
-            if (cb) cb();
+        deps.app.listen.mockImplementation(function(port, host, cb) {
+            if (typeof cb === 'function') cb();
             return { close: jest.fn() };
         });
         await server.start();

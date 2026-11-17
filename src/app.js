@@ -14,6 +14,8 @@ const cookieParser = require('cookie-parser');
 const config = require('./config/env');
 const { apiLimiter } = require('./middleware/rateLimiter.middleware');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
+const requestLog = require('./middleware/requestLog.middleware');
+require('./utils/networkMonitor');
 
 const authRoutes = require('./routes/auth.routes');
 const productRoutes = require('./routes/product.routes');
@@ -26,6 +28,8 @@ const adminRoutes = require('./routes/admin.routes');
 const app = express();
 
 // ── Core middleware ─────────────────────────────────────────────────
+app.use(requestLog);
+
 // credentials: true is REQUIRED for the refresh-token cookie (File 39)
 // to be sent cross-origin at all - and per the cors package's own
 // behavior, that requires an explicit origin, never '*'.

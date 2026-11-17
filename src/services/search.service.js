@@ -10,6 +10,10 @@
 const productService = require('./product.service');
 const searchHistoryRepository = require('../repositories/searchHistory.repository');
 const logger = require('../utils/logger');
+const config = require('../config/env');
+
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = config.search.defaultLimit;
 
 // ── Sorting ──────────────────────────────────────────────────────────
 // Deliberately a small, separate, pure function - NOT inlined into
@@ -42,11 +46,18 @@ function getSortedProducts(products, sortBy) {
 // Search returns the complete merged result set from every active marketplace.
 // The expensive marketplace fetch remains cached in product.service.js.
 async function runSearch(query, userId, options) {
-    const searchResult = await productService.searchAndPersist(query, options);
+    const searchOptions = options
+        ? { sortBy: options.sortBy, platform: options.platform }
+        : undefined;
+    const searchResult = await productService.searchAndPersist(query, searchOptions);
 
     // Marketplace adapters already searched for this query; a second
     // literal-token filter can discard valid results with different wording.
     const sorted = getSortedProducts(searchResult.products, options && options.sortBy);
+    const page = (options && options.page) || DEFAULT_PAGE;
+    const limit = (options && options.limit) || DEFAULT_LIMIT;
+    const total = sorted.length;
+    const start = (page - 1) * limit;
 
     // Recorded against the TOTAL count across every page, not just
     // whichever page was requested - "how many results did this search
@@ -56,7 +67,7 @@ async function runSearch(query, userId, options) {
             await searchHistoryRepository.recordSearch(
                 userId,
                 query,
-                sorted.length,
+                total,
                 (options && options.platform) || null
             );
         } catch (err) {
@@ -67,8 +78,11 @@ async function runSearch(query, userId, options) {
     }
 
     return {
-        products: sorted,
-        total: sorted.length,
+        products: sorted.slice(start, start + limit),
+        total: total,
+        page: page,
+        limit: limit,
+        totalPages: Math.ceil(total / limit) || 0,
         marketplaceFailures: searchResult.marketplaceFailures,
     };
 }

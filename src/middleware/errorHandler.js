@@ -74,13 +74,16 @@ function normalizeError(err) {
 // error middleware, even though `next` is unused ──────────────────────
 function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-vars
     const apiError = normalizeError(err);
+    const endpoint = req.path || (req.originalUrl ? req.originalUrl.split('?')[0] : '/');
 
     // Log every 5xx with full detail; log 4xx at a lower level since those
     // are normal, expected client mistakes, not something to alert on.
     const logPayload = {
         method: req.method,
-        path: req.originalUrl,
-        statusCode: apiError.statusCode,
+        endpoint: endpoint,
+        httpStatus: apiError.statusCode,
+        requestId: req.requestId || null,
+        sourceIp: req.ip || null,
     };
 
     if (apiError.statusCode >= 500) {
@@ -89,7 +92,10 @@ function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-va
             message: originalErr.message,
             stack: originalErr.stack,
             method: logPayload.method,
-            path: logPayload.path,
+            endpoint: logPayload.endpoint,
+            httpStatus: logPayload.httpStatus,
+            requestId: logPayload.requestId,
+            sourceIp: logPayload.sourceIp,
         });
     } else {
         logger.warn('Request rejected', Object.assign({ message: apiError.message }, logPayload));

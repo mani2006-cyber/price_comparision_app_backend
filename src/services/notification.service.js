@@ -27,4 +27,11 @@ async function markAllAsRead(userId) {
     return { modifiedCount };
 }
 
-module.exports = { getInbox, markAsRead, markAllAsRead };
+async function deleteNotification(notificationId, userId) {
+    const deleted = await notificationRepository.deleteByIdForUser(notificationId, userId);
+    if (!deleted) {
+        throw ApiError.notFound('Notification not found');
+    }
+}
+
+module.exports = { getInbox, markAsRead, markAllAsRead, deleteNotification };

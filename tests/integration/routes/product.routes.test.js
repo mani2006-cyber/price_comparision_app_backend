@@ -172,17 +172,37 @@ describe('GET /api/search', function() {
             return results;
         }
 
-        it('returns all results without pagination metadata', async function() {
+        it('returns pagination metadata and the default page', async function() {
             adapters.searchAllMarketplaces.mockResolvedValue({ results: manyResults(30), failures: [] });
 
             const res = await request(app).get('/api/search').query({ q: 'laptop' });
 
             expect(res.status).toBe(200);
-            expect(res.body.products).toHaveLength(30);
+            expect(res.body.products).toHaveLength(20);
             expect(res.body.resultCount).toBe(30);
-            expect(res.body.page).toBeUndefined();
-            expect(res.body.limit).toBeUndefined();
-            expect(res.body.totalPages).toBeUndefined();
+            expect(res.body.page).toBe(1);
+            expect(res.body.limit).toBe(20);
+            expect(res.body.totalPages).toBe(2);
+        });
+
+        it('returns the requested page and limit', async function() {
+            adapters.searchAllMarketplaces.mockResolvedValue({ results: manyResults(30), failures: [] });
+
+            const res = await request(app)
+                .get('/api/search')
+                .query({ q: 'laptop', page: '2', limit: '10' });
+
+            expect(res.status).toBe(200);
+            expect(res.body.products).toHaveLength(10);
+            expect(res.body.products[0].currentPrice).toBe(10);
+            expect(res.body.products[9].currentPrice).toBe(19);
+            expect(res.body.resultCount).toBe(30);
+            expect(res.body.page).toBe(2);
+            expect(res.body.limit).toBe(10);
+            expect(res.body.totalPages).toBe(3);
+            const adapterOptions = adapters.searchAllMarketplaces.mock.calls[0][1];
+            expect(adapterOptions.page).toBeUndefined();
+            expect(adapterOptions.limit).toBeUndefined();
         });
     });
 });

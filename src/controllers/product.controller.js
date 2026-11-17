@@ -22,6 +22,8 @@ async function search(req, res) {
     const options = {
         sortBy: req.query.sortBy || undefined,
         platform: req.query.platform || undefined,
+        page: req.query.page,
+        limit: req.query.limit,
     };
 
     // req.userId is set by optionalAuth ONLY if a valid access token was
@@ -34,6 +36,9 @@ async function search(req, res) {
         query: query.trim(),
         resultCount: result.total,
         products: result.products,
+        page: result.page,
+        limit: result.limit,
+        totalPages: result.totalPages,
         marketplaceFailures: result.marketplaceFailures,
     });
 }

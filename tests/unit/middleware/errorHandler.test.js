@@ -20,7 +20,7 @@ function fakeRes() {
 }
 
 function fakeReq() {
-    return { method: 'GET', originalUrl: '/api/search' };
+    return { method: 'GET', originalUrl: '/api/search?q=laptop', path: '/api/search' };
 }
 
 describe('notFoundHandler', function() {
@@ -38,6 +38,22 @@ describe('notFoundHandler', function() {
 });
 
 describe('errorHandler', function() {
+    it('logs the full query-free request path instead of a router-local route path', function() {
+        const logger = require('../../../src/utils/logger');
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(function() {});
+        const req = Object.assign(fakeReq(), {
+            route: { path: '/search' },
+            baseUrl: '',
+        });
+
+        errorHandler(ApiError.badRequest('Bad input'), req, fakeRes(), jest.fn());
+
+        expect(warnSpy).toHaveBeenCalledWith('Request rejected', expect.objectContaining({
+            endpoint: '/api/search',
+        }));
+        warnSpy.mockRestore();
+    });
+
     it('passes an ApiError straight through with its own statusCode/message', function() {
         const res = fakeRes();
         errorHandler(ApiError.badRequest('Bad input'), fakeReq(), res, jest.fn());

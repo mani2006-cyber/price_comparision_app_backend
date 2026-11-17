@@ -11,7 +11,6 @@ const { z } = require('zod');
 const config = require('../config/env');
 
 const SORT_BY_VALUES = ['price_asc', 'price_desc', 'rating'];
-
 // GET /api/search - q is the only required field; the exact same
 // message is used for BOTH "missing entirely" (a plain object with no
 // q key parses q as undefined -> zod's type error) and "present but
@@ -29,6 +28,12 @@ const searchQuerySchema = z.object({
     // without a matching code change in two places. A non-empty string
     // is enough to catch the obvious mistakes (e.g. "?platform=").
     platform: z.string().trim().min(1).optional(),
+    page: z.coerce.number("'page' must be a number").int().min(1).optional(),
+    limit: z.coerce.number("'limit' must be a number")
+        .int()
+        .min(1)
+        .max(config.search.maxLimit)
+        .optional(),
 });
 
 // POST /api/compare-url - a real URL, not just "any non-empty string"

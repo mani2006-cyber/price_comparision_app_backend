@@ -3,8 +3,8 @@
 // All direct Mongoose access for the Notification collection.
 // createForAlertTrigger is the purpose-built creation path for the one
 // producer we already know about (Alert firing) - it owns the message
-// formatting so that logic lives in exactly one place. Deliberately no
-// generic updateById: once created, only isRead should ever change.
+// formatting so that logic lives in exactly one place. Updates are limited
+// to read state, and deletes always scope by owner.
 //
 // This file is also the ONE place that calls notificationBus.publish()
 // and invalidates the cached inbox (cache.del) - both happen here,
@@ -122,6 +122,14 @@ async function markAllAsReadForUser(userId) {
     return result.modifiedCount;
 }
 
+async function deleteByIdForUser(notificationId, userId) {
+    const deleted = await Notification.findOneAndDelete({ _id: notificationId, userId });
+    if (deleted) {
+        invalidateInboxCache(userId);
+    }
+    return deleted;
+}
+
 module.exports = {
     createForAlertTrigger,
     create,
@@ -129,4 +137,5 @@ module.exports = {
     getUnreadCount,
     markAsRead,
     markAllAsReadForUser,
+    deleteByIdForUser,
 };
