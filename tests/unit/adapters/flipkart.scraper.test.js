@@ -36,6 +36,18 @@ const GALLERY_800 = [
     '<img src="https://rukminim2.flixcart.com/image/800/1070/xif0q/mobile/x/k/m/-original-imahfvx37fmsbhhr.jpeg?q=90" />',
 ].join('');
 
+function searchPageHtml(productCount) {
+    let cards = '';
+    for (let i = 0; i < productCount; i++) {
+        cards += '<div data-id="FLIPKARTPID' + i + '">' +
+            '<a class="k7wcnx" href="/product-' + i + '/p/item' + i + '?pid=FLIPKARTPID' + i + '"></a>' +
+            '<div class="RG5Slk">Product ' + i + '</div>' +
+            '<div class="hZ3P6w">₹' + (1000 + i) + '</div>' +
+            '</div>';
+    }
+    return '<html><body>' + cards + '</body></html>';
+}
+
 // Same two photos, re-served as small thumbnails (SAME filename hash,
 // different /W/H/ prefix) - must be deduped away, not counted as
 // additional images.
@@ -117,6 +129,42 @@ describe('searchByLink - image extraction', function() {
         const result = await flipkart.searchByLink('https://www.flipkart.com/x/p/y?pid=MOBH4DQFG8NKFRDY');
 
         expect(result.images).toEqual([]);
+    });
+});
+
+describe('searchByQuery', function() {
+    it('returns every valid result card in the search response, not just the first eight', async function() {
+        axios.get.mockResolvedValue({ data: searchPageHtml(12), headers: {} });
+
+        const results = await flipkart.searchByQuery('test products');
+
+        expect(results).toHaveLength(12);
+    });
+
+    it('sets the product category from search-page breadcrumbs when present', async function() {
+        const html = searchPageHtml(1).replace(
+            '<body>',
+            '<body><nav class="breadcrumb"><a>Home</a><a>Electronics</a><a>Laptops</a></nav>'
+        );
+        axios.get.mockResolvedValue({ data: html, headers: {} });
+
+        const results = await flipkart.searchByQuery('laptop');
+
+        expect(results[0].category).toBe('Laptops');
+        expect(results[0].categoryPath).toEqual(['Electronics', 'Laptops']);
+    });
+
+    it('does not treat pagination links as a category breadcrumb', async function() {
+        const html = searchPageHtml(1).replace(
+            '<body>',
+            '<body><nav class="pagination"><a>1</a><a>2</a><a>Next</a></nav>'
+        );
+        axios.get.mockResolvedValue({ data: html, headers: {} });
+
+        const results = await flipkart.searchByQuery('laptop');
+
+        expect(results[0].category).toBeNull();
+        expect(results[0].categoryPath).toEqual([]);
     });
 });
 

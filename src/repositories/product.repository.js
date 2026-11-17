@@ -91,15 +91,23 @@ async function upsertFromProviderData(providerData, session) {
     const priceChanged = existing.currentPrice !== providerData.currentPrice;
 
     const update = Object.assign({}, providerData, { lastCheckedAt: now });
+    const categoryPathMissing = !Array.isArray(providerData.categoryPath) || providerData.categoryPath.length === 0;
+    const existingCategoryPath = Array.isArray(existing.categoryPath) ? existing.categoryPath : [];
+    const hasFlipkartPaginationCategory = providerData.marketplace === 'flipkart' && categoryPathMissing && (
+        /^(next|previous|\d+)$/i.test(String(existing.category || '').trim()) ||
+        existingCategoryPath.some(function(item) { return /^(next|previous)$/i.test(String(item).trim()); }) ||
+        (existingCategoryPath.length > 0 && existingCategoryPath.every(function(item) { return /^\d+$/.test(String(item).trim()); }))
+    );
 
     // Search cards often do not expose a breadcrumb. Do not erase a category
-    // obtained earlier from a product-detail response in that case.
-    if (!providerData.category && existing.category) {
+    // obtained earlier from a product-detail response, except a Flipkart
+    // pagination path accidentally stored as a category.
+    if (!providerData.category && existing.category && !hasFlipkartPaginationCategory) {
         update.category = existing.category;
     }
-    if ((!Array.isArray(providerData.categoryPath) || providerData.categoryPath.length === 0) &&
+    if (categoryPathMissing &&
         Array.isArray(existing.categoryPath) && existing.categoryPath.length > 0) {
-        update.categoryPath = existing.categoryPath;
+        if (!hasFlipkartPaginationCategory) update.categoryPath = existing.categoryPath;
     }
 
     // findByIdAndUpdate below is a QUERY-level operation - it does NOT run

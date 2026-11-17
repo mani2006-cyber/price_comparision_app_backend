@@ -179,11 +179,10 @@ const config = {
         delayMs: getNumber('PRICE_REFRESHER_DELAY_MS', 2000),
     },
 
-    // Shared by every scraper-based adapter (amazon/flipkart's fallback
-    // path, myntra/lenskart/nykaa/poorvika/vijaysales always) - each used
-    // to hardcode its own axios timeout (a mix of 15000/20000) and its own
-    // MAX_SEARCH_RESULTS = 8 independently - 7 near-identical constants
-    // duplicated instead of one shared, tunable value.
+    // Shared timeout and result cap for scraper adapters that opt into a
+    // cap; Flipkart's HTML search parser returns every valid card it finds.
+    // Seven adapters previously hardcoded their own axios timeout (a mix
+    // of 15000/20000) and MAX_SEARCH_RESULTS = 8 independently.
     scraper: {
         timeoutMs: getNumber('SCRAPER_TIMEOUT_MS', 20000),
         maxSearchResults: getNumber('SCRAPER_MAX_SEARCH_RESULTS', 8),

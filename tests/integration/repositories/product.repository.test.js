@@ -70,6 +70,37 @@ describe('upsertFromProviderData - update path, no price change', function() {
     });
 });
 
+describe('upsertFromProviderData - stale Flipkart pagination category', function() {
+    const externalId = 'REPOTEST_FLIPKART_CATEGORY';
+
+    beforeEach(async function() {
+        await Product.deleteOne({ marketplace: 'flipkart', externalId });
+    });
+
+    afterEach(async function() {
+        await Product.deleteOne({ marketplace: 'flipkart', externalId });
+    });
+
+    it('clears a numeric/Next path when a clean Flipkart refresh has no breadcrumb', async function() {
+        await productRepository.upsertFromProviderData(baseData({
+            marketplace: 'flipkart',
+            externalId,
+            category: 'Next',
+            categoryPath: ['1', '2', '3', 'Next'],
+        }));
+
+        const result = await productRepository.upsertFromProviderData(baseData({
+            marketplace: 'flipkart',
+            externalId,
+            category: null,
+            categoryPath: [],
+        }));
+
+        expect(result.product.category).toBeNull();
+        expect(result.product.categoryPath).toEqual([]);
+    });
+});
+
 describe('upsertFromProviderData - update path, price changed', function() {
     it('detects a price drop and updates lowestPrice', async function() {
         await productRepository.upsertFromProviderData(baseData({ currentPrice: 10000 }));

@@ -149,6 +149,18 @@ describe('runSearch - complete result set', function() {
         expect(result.totalPages).toBeUndefined();
     });
 
+    it('keeps all marketplace results when some titles do not literally contain the query', async function() {
+        const products = [{ title: 'Gaming laptop', marketplace: 'flipkart' }];
+        for (let i = 0; i < 23; i++) {
+            products.push({ title: 'Notebook computer ' + i, marketplace: 'flipkart' });
+        }
+        productService.searchAndPersist.mockResolvedValue({ products, marketplaceFailures: [] });
+
+        const result = await searchService.runSearch('laptop', null);
+
+        expect(result.products).toHaveLength(24);
+    });
+
     it('records search history against the TOTAL count, not the page size', async function() {
         productService.searchAndPersist.mockResolvedValue({ products: fakeProducts(47), marketplaceFailures: [] });
 

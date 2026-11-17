@@ -15,7 +15,6 @@ const config = require('../../config/env');
 const { withDefaults, validateProviderProduct, validateProviderProductList } = require('../provider.interface');
 
 const BASE = 'https://www.flipkart.com';
-const MAX_SEARCH_RESULTS = config.scraper.maxSearchResults;
 
 function getHeaders() {
     return {
@@ -82,7 +81,7 @@ function absoluteUrl(href) {
 }
 
 function extractBreadcrumb($) {
-    return $('nav a, ._1MR4o5 a, [class*="breadcrumb"] a')
+    return $('._1MR4o5 a, [class*="breadcrumb"] a')
         .map(function() { return $(this).text().replace(/\\s+/g, ' ').trim(); })
         .get()
         .filter(function(value) { return value && value.toLowerCase() !== 'home'; });
@@ -93,13 +92,14 @@ function extractBreadcrumb($) {
 function parseSearchResults(html) {
     const $ = cheerio.load(html);
     const results = [];
+    const categoryPath = extractBreadcrumb($);
 
     // Flipkart's class names are obfuscated and change periodically - if
     // this stops matching, re-save a live search page HTML and inspect it
     // fresh, same process used to find these originally.
     const items = $('[data-id]').toArray();
 
-    for (let i = 0; i < items.length && results.length < MAX_SEARCH_RESULTS; i++) {
+    for (let i = 0; i < items.length; i++) {
         const el = $(items[i]);
 
         const title = el.find('div.RG5Slk').first().text().trim();
@@ -129,6 +129,8 @@ function parseSearchResults(html) {
                 marketplace: 'flipkart',
                 externalId: pid,
                 title,
+                category: categoryPath.length > 0 ? categoryPath[categoryPath.length - 1] : null,
+                categoryPath,
                 images: image ? [image] : [],
                 currentPrice: parseFloat(priceDigits),
                 currency: 'INR',

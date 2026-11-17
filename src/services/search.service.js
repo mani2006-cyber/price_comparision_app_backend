@@ -11,34 +11,6 @@ const productService = require('./product.service');
 const searchHistoryRepository = require('../repositories/searchHistory.repository');
 const logger = require('../utils/logger');
 
-function filterByQuery(products, query) {
-    const tokens = String(query || '')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, ' ')
-        .trim()
-        .split(/\s+/)
-        .filter(function(token) { return token.length > 1; });
-
-    if (tokens.length === 0) return products;
-
-    return products.filter(function(product) {
-        const fields = [
-            product.title,
-            product.brand,
-            product.category,
-            Array.isArray(product.categoryPath) ? product.categoryPath.join(' ') : '',
-            Array.isArray(product.keywords) ? product.keywords.join(' ') : '',
-        ].filter(Boolean);
-
-        // Keep legacy/incomplete records visible until they have enough
-        // product text to make a relevance decision.
-        if (fields.length === 0) return true;
-
-        const searchable = fields.join(' ').toLowerCase();
-        return tokens.every(function(token) { return searchable.indexOf(token) !== -1; });
-    });
-}
-
 // ── Sorting ──────────────────────────────────────────────────────────
 // Deliberately a small, separate, pure function - NOT inlined into
 // runSearch below. The old codebase had a sort bug that silently no-op'd
@@ -72,12 +44,9 @@ function getSortedProducts(products, sortBy) {
 async function runSearch(query, userId, options) {
     const searchResult = await productService.searchAndPersist(query, options);
 
-    const filtered = filterByQuery(searchResult.products, query);
-    // Marketplace adapters already searched for this query. If their title
-    // or category wording differs from the query, do not turn valid results
-    // into an empty frontend response.
-    const relevant = filtered.length > 0 ? filtered : searchResult.products;
-    const sorted = getSortedProducts(relevant, options && options.sortBy);
+    // Marketplace adapters already searched for this query; a second
+    // literal-token filter can discard valid results with different wording.
+    const sorted = getSortedProducts(searchResult.products, options && options.sortBy);
 
     // Recorded against the TOTAL count across every page, not just
     // whichever page was requested - "how many results did this search
