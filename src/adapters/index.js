@@ -11,6 +11,7 @@
 
 const logger = require('../utils/logger');
 const ApiError = require('../utils/ApiError');
+const { getMarketplaceForHost, validateMarketplaceUrl } = require('./shared/safeMarketplaceRequest');
 
 const amazon = require('./amazon'); // ← back to the orchestrator, not amazon.api directly
 const flipkart = require('./flipkart');
@@ -101,29 +102,22 @@ async function searchAllMarketplaces(query, options) {
 
 // ── Single-marketplace product lookup (for compare-url) ────────────
 //
-// Detects which marketplace a URL belongs to (simple hostname match)
+// Detects which marketplace a supported HTTPS URL belongs to
 // and delegates to that adapter's searchByLink. Used by the compare
 // service to fetch the "original" product before finding cross-
 // marketplace matches.
 function detectMarketplaceFromUrl(url) {
-    if (!url) return null;
-    const lower = url.toLowerCase();
-
-    if (lower.indexOf('amazon.') !== -1) return 'amazon';
-    if (lower.indexOf('flipkart.') !== -1) return 'flipkart';
-    if (lower.indexOf('myntra.') !== -1) return 'myntra';
-    if (lower.indexOf('lenskart.') !== -1) return 'lenskart';
-    if (lower.indexOf('nykaa.') !== -1) return 'nykaa';
-    if (lower.indexOf('poorvika.') !== -1) return 'poorvika';
-    if (lower.indexOf('vijaysales.') !== -1) return 'vijaysales';
-
-    return null;
+    try {
+        return getMarketplaceForHost(validateMarketplaceUrl(url).hostname);
+    } catch (err) {
+        return null;
+    }
 }
 
 async function searchByLink(url) {
     const marketplace = detectMarketplaceFromUrl(url);
     if (!marketplace) {
-        throw ApiError.badRequest('Could not detect a supported marketplace from this URL: ' + url);
+        throw ApiError.badRequest('A valid HTTPS URL from a supported marketplace is required');
     }
 
     const adapter = getAdapter(marketplace);

@@ -38,8 +38,7 @@ async function findValidByRawToken(rawToken) {
 // Used specifically for reuse-detection: was this raw token issued at
 // some point, REGARDLESS of current revoked/expired state? A hit here
 // combined with revoked: true is the signal an already-rotated token is
-// being presented again - see RefreshToken.model.js's replacedByTokenId
-// comment for the future hardening this enables.
+// being presented again; the service revokes every active session.
 async function findAnyByRawToken(rawToken) {
     const tokenHash = RefreshToken.hashToken(rawToken);
     return RefreshToken.findOne({ tokenHash });

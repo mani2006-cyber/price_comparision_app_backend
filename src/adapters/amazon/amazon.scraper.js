@@ -8,10 +8,10 @@
 
 'use strict';
 
-const axios = require('axios');
 const cheerio = require('cheerio');
 const logger = require('../../utils/logger');
 const config = require('../../config/env');
+const { safeGet } = require('../shared/safeMarketplaceRequest');
 const { withDefaults, validateProviderProduct, validateProviderProductList } = require('../provider.interface');
 
 const BASE = 'https://www.amazon.in';
@@ -94,11 +94,10 @@ async function fetchHtml(url, referer) {
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
-            const response = await axios.get(url, {
+            const response = await safeGet(url, {
                 headers: getHeaders(referer),
                 timeout: config.scraper.timeoutMs,
                 decompress: true,
-                maxRedirects: 5,
                 // Let us inspect 503s ourselves instead of axios throwing immediately
                 validateStatus: (status) => status === 200 || status === 503,
             });
@@ -144,6 +143,10 @@ async function fetchHtml(url, referer) {
 
         } catch (err) {
             lastErr = err;
+
+            if (err.code === 'ERR_UNSAFE_DESTINATION' || err.statusCode === 400) {
+                throw err;
+            }
 
             // Network-level errors (timeout, DNS, connection reset, etc.) - retry these too
             const isLastAttempt = attempt === MAX_RETRIES;

@@ -27,6 +27,10 @@ const userSchema = new mongoose.Schema({
         required: true,
         select: false, // never returned by default - see file header comment
     },
+    emailMfaEnabled: {
+        type: Boolean,
+        default: false,
+    },
 }, {
     timestamps: true,
 });

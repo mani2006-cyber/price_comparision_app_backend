@@ -97,6 +97,16 @@ checkpoints/
 *.joblib
 *.pkl
 
+security-monitor/backend/node_modules/
+security-monitor/backend/.env
+security-monitor/backend/.env.*
+!security-monitor/backend/.env.example
+security-monitor/frontend/node_modules/
+security-monitor/frontend/dist/
+security-monitor/frontend/.env
+security-monitor/frontend/.env.*
+!security-monitor/frontend/.env.example
+
 # Uncomment these if you don't want to store datasets
 # datasets/
 # data/

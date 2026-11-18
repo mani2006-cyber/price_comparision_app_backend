@@ -9,6 +9,7 @@
 'use strict';
 
 const axios = require('axios');
+const { safeGet } = require('../shared/safeMarketplaceRequest');
 const cheerio = require('cheerio');
 const logger = require('../../utils/logger');
 const config = require('../../config/env');
@@ -96,7 +97,7 @@ function sleep(ms) {
 async function fetchHtml(url) {
     const cookie = await warmUpCookies(false);
     try {
-        const response = await axios.get(url, buildAxiosOptions(cookie));
+        const response = await safeGet(url, buildAxiosOptions(cookie));
         return response.data;
     } catch (err) {
         const status = err.response ? err.response.status : null;
@@ -104,7 +105,7 @@ async function fetchHtml(url) {
             logger.warn('Flipkart scraper: blocked, retrying once', { url, status });
             await sleep(1500 + Math.floor(Math.random() * 1000));
             const freshCookie = await warmUpCookies(true);
-            const retry = await axios.get(url, buildAxiosOptions(freshCookie));
+            const retry = await safeGet(url, buildAxiosOptions(freshCookie));
             return retry.data;
         }
         throw err;

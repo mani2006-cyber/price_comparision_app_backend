@@ -23,11 +23,54 @@ const signupBodySchema = z.object({
     // unique index), so this only rejects input that was always invalid.
     email: z.string('Missing or invalid field: email').trim().min(1, 'Missing or invalid field: email').email('Missing or invalid field: email'),
     password: z.string('Missing or invalid field: password').min(1, 'Missing or invalid field: password'),
+    captchaToken: z.string().max(2048).optional(),
 });
 
 const loginBodySchema = z.object({
     email: z.string('Missing or invalid field: email').trim().min(1, 'Missing or invalid field: email').email('Missing or invalid field: email'),
     password: z.string('Missing or invalid field: password').min(1, 'Missing or invalid field: password'),
+    captchaToken: z.string().max(2048).optional(),
 });
 
-module.exports = { signupBodySchema, loginBodySchema };
+const emailBodySchema = z.object({
+    email: z.string('Missing or invalid field: email').trim().min(1, 'Missing or invalid field: email').email('Missing or invalid field: email'),
+});
+
+const passwordResetBodySchema = z.object({
+    email: z.string('Missing or invalid field: email').trim().min(1, 'Missing or invalid field: email').email('Missing or invalid field: email'),
+    otp: z.string('Missing or invalid field: otp').regex(/^\d{6}$/, 'Missing or invalid field: otp'),
+    password: z.string('Missing or invalid field: password').min(1, 'Missing or invalid field: password'),
+});
+
+const passwordChangeBodySchema = z.object({
+    currentPassword: z.string('Missing or invalid field: currentPassword').min(1, 'Missing or invalid field: currentPassword'),
+    newPassword: z.string('Missing or invalid field: newPassword').min(1, 'Missing or invalid field: newPassword'),
+});
+
+const loginMfaBodySchema = z.object({
+    challengeToken: z.string('Missing or invalid field: challengeToken').min(32).max(128),
+    otp: z.string('Missing or invalid field: otp').regex(/^\d{6}$/, 'Missing or invalid field: otp'),
+});
+
+const emailMfaChallengeBodySchema = z.object({
+    password: z.string('Missing or invalid field: password').min(1, 'Missing or invalid field: password'),
+    action: z.string('Missing or invalid field: action').refine(function(value) {
+        return value === 'enable' || value === 'disable';
+    }, 'Missing or invalid field: action'),
+});
+
+const emailMfaVerifyBodySchema = z.object({
+    challengeToken: z.string('Missing or invalid field: challengeToken').min(32).max(128),
+    otp: z.string('Missing or invalid field: otp').regex(/^\d{6}$/, 'Missing or invalid field: otp'),
+});
+
+module.exports = {
+    signupBodySchema,
+    loginBodySchema,
+    emailBodySchema,
+    passwordResetBodySchema,
+    passwordChangeBodySchema,
+    loginMfaBodySchema,
+    emailMfaChallengeBodySchema,
+    emailMfaVerifyBodySchema,
+};

@@ -2,7 +2,11 @@
 
 'use strict';
 
-const { signupBodySchema, loginBodySchema } = require('../../../src/validators/auth.validators');
+const {
+    signupBodySchema,
+    loginBodySchema,
+    passwordResetBodySchema,
+} = require('../../../src/validators/auth.validators');
 
 describe('signupBodySchema', function() {
     it('accepts a well-formed signup body', function() {
@@ -39,6 +43,32 @@ describe('loginBodySchema', function() {
     it('accepts a well-formed login body', function() {
         const result = loginBodySchema.parse({ email: 'jane@example.com', password: 'x' });
         expect(result).toEqual({ email: 'jane@example.com', password: 'x' });
+    });
+
+    describe('passwordResetBodySchema', function() {
+        it('accepts a reset request with a six-digit OTP', function() {
+            const result = passwordResetBodySchema.parse({
+                email: '  jane@example.com  ',
+                otp: '012345',
+                password: 'new-password',
+            });
+
+            expect(result).toEqual({
+                email: 'jane@example.com',
+                otp: '012345',
+                password: 'new-password',
+            });
+        });
+
+        it('rejects OTPs that are not exactly six digits', function() {
+            expect(function() {
+                passwordResetBodySchema.parse({
+                    email: 'jane@example.com',
+                    otp: '12ab',
+                    password: 'new-password',
+                });
+            }).toThrow('Missing or invalid field: otp');
+        });
     });
 
     it('rejects a missing password', function() {

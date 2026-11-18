@@ -384,10 +384,8 @@ describe('searchByLink', function() {
         expect(result.externalId).not.toBe(result.sku);
     });
 
-    it('returns null when the URL has no extractable slug', async function() {
-        axios.get.mockResolvedValue({ data: productPageHtml() });
-
-        const result = await poorvika.searchByLink('not a valid url');
-        expect(result).toBeNull();
+    it('rejects an invalid URL before making a request', async function() {
+        await expect(poorvika.searchByLink('not a valid url')).rejects.toMatchObject({ statusCode: 400 });
+        expect(axios.get).not.toHaveBeenCalled();
     });
 });

@@ -55,6 +55,10 @@ class ApiError extends Error {
         return new ApiError(429, message || 'Too many requests');
     }
 
+    static serviceUnavailable(message) {
+        return new ApiError(503, message || 'Service temporarily unavailable');
+    }
+
     static internal(message) {
         return new ApiError(500, message || 'Internal server error');
     }

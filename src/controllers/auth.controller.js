@@ -9,6 +9,7 @@
 
 const config = require('../config/env');
 const authService = require('../services/auth.service');
+const securityMonitorAgent = require('../security/securityMonitorAgent');
 
 // ── Cookie helpers ───────────────────────────────────────────────────
 
@@ -96,14 +97,56 @@ async function signup(req, res) {
 }
 
 async function login(req, res) {
-    const result = await authService.login(
-        req.body.email.trim(),
-        req.body.password,
-        getRequestMeta(req)
-    );
+    let result;
+    try {
+        result = await authService.login(
+            req.body.email.trim(),
+            req.body.password,
+            getRequestMeta(req)
+        );
+    } catch (err) {
+        if (err.statusCode === 401) {
+            securityMonitorAgent.reportAuth(req, 'failure', req.body.email);
+        }
+        throw err;
+    }
 
+    if (result.mfaRequired) {
+        return res.status(202).json({
+            success: true,
+            mfaRequired: true,
+            challengeToken: result.challengeToken,
+            expiresInSeconds: result.expiresInSeconds,
+        });
+    }
+
+    securityMonitorAgent.reportAuth(req, 'success', req.body.email);
     setRefreshCookie(res, result.refreshToken);
 
+    res.status(200).json({
+        success: true,
+        user: result.user,
+        accessToken: result.accessToken,
+    });
+}
+
+async function loginMfa(req, res) {
+    let result;
+    try {
+        result = await authService.completeLoginMfa(
+            req.body.challengeToken,
+            req.body.otp,
+            getRequestMeta(req)
+        );
+    } catch (err) {
+        if (err.statusCode === 401) {
+            securityMonitorAgent.reportAuth(req, 'failure');
+        }
+        throw err;
+    }
+
+    securityMonitorAgent.reportAuth(req, 'success', result.user.email);
+    setRefreshCookie(res, result.refreshToken);
     res.status(200).json({
         success: true,
         user: result.user,
@@ -133,4 +176,64 @@ async function logout(req, res) {
     res.status(200).json({ success: true, message: 'Logged out' });
 }
 
-module.exports = { signup, login, refresh, logout };
+async function beginEmailMfaChallenge(req, res) {
+    const result = await authService.beginEmailMfaChallenge(
+        req.userId,
+        req.body.password,
+        req.body.action,
+        getRequestMeta(req)
+    );
+
+    res.status(202).json(Object.assign({ success: true }, result));
+}
+
+async function completeEmailMfaChallenge(req, res) {
+    const result = await authService.completeEmailMfaChallenge(
+        req.userId,
+        req.body.challengeToken,
+        req.body.otp,
+        getRequestMeta(req)
+    );
+
+    res.status(200).json(Object.assign({ success: true }, result));
+}
+
+async function changePassword(req, res) {
+    await authService.changePassword(
+        req.userId,
+        req.body.currentPassword,
+        req.body.newPassword,
+        getRequestMeta(req)
+    );
+    clearRefreshCookie(res);
+    res.status(200).json({ success: true, message: 'Password changed; please sign in again' });
+}
+
+async function requestPasswordReset(req, res) {
+    const result = await authService.requestPasswordReset(req.body.email.trim(), getRequestMeta(req));
+    res.status(202).json(Object.assign({ success: true }, result));
+}
+
+async function completePasswordReset(req, res) {
+    await authService.completePasswordReset(
+        req.body.email.trim(),
+        req.body.otp,
+        req.body.password,
+        getRequestMeta(req)
+    );
+    clearRefreshCookie(res);
+    res.status(200).json({ success: true, message: 'Password reset successfully; please sign in again' });
+}
+
+module.exports = {
+    signup,
+    login,
+    loginMfa,
+    refresh,
+    logout,
+    beginEmailMfaChallenge,
+    completeEmailMfaChallenge,
+    changePassword,
+    requestPasswordReset,
+    completePasswordReset,
+};

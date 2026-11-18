@@ -11,6 +11,7 @@
         "start": "node server.js",
         "dev": "node --watch server.js",
         "test": "cross-env NODE_ENV=test jest --runInBand",
+        "test:security-monitor": "cross-env NODE_ENV=test jest --runInBand --config security-monitor/jest.config.js",
         "test:watch": "cross-env NODE_ENV=test jest --runInBand --watch",
         "seed:catalog": "node scripts/seed-catalog.js"
     },
@@ -31,6 +32,7 @@
         "mongoose": "^8.9.0",
         "node-cache": "^5.1.2",
         "node-cron": "^3.0.3",
+        "nodemailer": "^10.6.0",
         "pino": "^10.3.1",
         "zod": "^4.4.3"
     },

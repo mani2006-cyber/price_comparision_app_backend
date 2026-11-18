@@ -100,6 +100,27 @@ describe('logger', function() {
         expect(message).not.toContain('person@example.test');
     });
 
+    it('redacts MFA codes, CAPTCHA tokens, and account-recovery tokens', function() {
+        logger.security('verification sent', {
+            otp: '123456',
+            mfaCode: '654321',
+            captchaToken: 'captcha-secret',
+            challengeToken: 'challenge-secret',
+            resetToken: 'reset-secret',
+            verificationCode: '000000',
+        });
+
+        const [meta] = mockPinoLogger.info.mock.calls[0];
+        expect(meta).toEqual(expect.objectContaining({
+            otp: '[REDACTED]',
+            mfaCode: '[REDACTED]',
+            captchaToken: '[REDACTED]',
+            challengeToken: '[REDACTED]',
+            resetToken: '[REDACTED]',
+            verificationCode: '[REDACTED]',
+        }));
+    });
+
     it('writes security and access events with distinct event types', function() {
         logger.security('Login failed', { outcome: 'failure' }, 'warn');
         logger.access('HTTP request completed', { method: 'GET' });

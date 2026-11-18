@@ -14,6 +14,9 @@ const redactPaths = [
     'phone', '*.phone', 'mobile', '*.mobile', 'address', '*.address',
     'name', '*.name', 'firstName', '*.firstName', 'lastName', '*.lastName',
     'dateOfBirth', '*.dateOfBirth', 'dob', '*.dob', 'secret', '*.secret',
+    'otp', '*.otp', 'mfaCode', '*.mfaCode', 'captchaToken', '*.captchaToken',
+    'challengeToken', '*.challengeToken', 'resetToken', '*.resetToken',
+    'verificationCode', '*.verificationCode',
 ];
 
 const loggerOptions = {
@@ -61,6 +64,7 @@ function isSensitiveKey(key) {
         'adminapikey', 'xapikey', 'xadminkey', 'rapidapikey', 'key',
         'email', 'phone', 'mobile', 'address', 'name', 'username',
         'firstname', 'lastname', 'dateofbirth', 'dob', 'secret', 'query',
+        'otp', 'mfacode', 'captchatoken', 'challengetoken', 'resettoken', 'verificationcode',
     ].indexOf(normalized) !== -1;
 }
 
@@ -71,7 +75,7 @@ function sanitizeString(value) {
         .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_JWT]')
         .replace(/(https?:\/\/)[^/\s:@]+:[^/\s@]+@/gi, '$1[REDACTED]@')
         .replace(/([?&][^=&\s]+)=([^&#\s]*)/g, '$1=[REDACTED]')
-        .replace(/\b(password|passwd|pwd|access[_-]?token|refresh[_-]?token|token|cookie|secret|(?:x-)?api[_-]?key|admin[_-]?key|email|phone|mobile|address|first[_-]?name|last[_-]?name)\s*[:=]\s*["']?[^"'\s,;]+/gi, '$1=[REDACTED]')
+        .replace(/\b(password|passwd|pwd|access[_-]?token|refresh[_-]?token|captcha[_-]?token|challenge[_-]?token|reset[_-]?token|token|mfa[_-]?code|verification[_-]?code|otp|cookie|secret|(?:x-)?api[_-]?key|admin[_-]?key|email|phone|mobile|address|first[_-]?name|last[_-]?name)\s*[:=]\s*["']?[^"'\s,;]+/gi, '$1=[REDACTED]')
         .replace(/\b(?:cookie|set-cookie)\s*:\s*[^\r\n]*/gi, 'Cookie: [REDACTED]')
         .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[REDACTED_EMAIL]')
         .replace(/\b(x-api-key|x-admin-key|rapidapi-key|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]');

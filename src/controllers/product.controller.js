@@ -11,6 +11,8 @@ const ApiError = require('../utils/ApiError');
 const searchService = require('../services/search.service');
 const productService = require('../services/product.service');
 const compareService = require('../services/compare.service');
+const adapters = require('../adapters');
+const securityMonitorAgent = require('../security/securityMonitorAgent');
 
 // ── Search (guest OR authenticated - see optionalAuth in the route) ────
 async function search(req, res) {
@@ -56,7 +58,33 @@ async function compareUrl(req, res) {
         page: req.query.page,
         limit: req.query.limit,
     };
-    const result = await compareService.compareByUrl(url, options);
+    let result;
+    try {
+        result = await compareService.compareByUrl(url, options);
+    } catch (err) {
+        if (err.statusCode === 400 || err.code === 'ERR_UNSAFE_DESTINATION') {
+            let parsedUrl;
+            try {
+                parsedUrl = new URL(url);
+            } catch (parseError) {
+                securityMonitorAgent.reportUrlRejected(req, 'invalid_url');
+            }
+
+            if (parsedUrl) {
+                const reason = err.code === 'ERR_UNSAFE_DESTINATION' ||
+                    parsedUrl.protocol !== 'https:' ||
+                    parsedUrl.username ||
+                    parsedUrl.password ||
+                    parsedUrl.port
+                    ? 'ssrf_blocked'
+                    : adapters.detectMarketplaceFromUrl(url)
+                        ? 'invalid_url'
+                        : 'unsupported_marketplace';
+                securityMonitorAgent.reportUrlRejected(req, reason, parsedUrl.hostname);
+            }
+        }
+        throw err;
+    }
     res.status(200).json({ success: true, result });
 }
 

@@ -31,6 +31,10 @@ async function findByEmailWithPassword(email) {
     return User.findOne({ email: email.toLowerCase() }).select('+password');
 }
 
+async function findByIdWithPassword(id) {
+    return User.findById(id).select('+password');
+}
+
 async function existsByEmail(email) {
     const count = await User.countDocuments({ email: email.toLowerCase() });
     return count > 0;
@@ -41,11 +45,28 @@ async function updateById(id, updates) {
     return User.findByIdAndUpdate(id, updates, { new: true, runValidators: true });
 }
 
+async function updatePasswordById(id, password) {
+    const user = await findByIdWithPassword(id);
+    if (!user) {
+        return null;
+    }
+
+    user.password = password;
+    return user.save();
+}
+
+async function setEmailMfaEnabled(id, enabled) {
+    return User.findByIdAndUpdate(id, { emailMfaEnabled: enabled }, { new: true, runValidators: true });
+}
+
 module.exports = {
     create,
     findById,
     findByEmail,
     findByEmailWithPassword,
+    findByIdWithPassword,
     existsByEmail,
     updateById,
+    updatePasswordById,
+    setEmailMfaEnabled,
 };

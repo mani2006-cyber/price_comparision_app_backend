@@ -110,6 +110,26 @@ const config = {
         refreshCookieName: getString('REFRESH_COOKIE_NAME', 'refreshToken'),
     },
 
+    email: {
+        smtpHost: getString('SMTP_HOST', null),
+        smtpPort: getNumber('SMTP_PORT', 587),
+        smtpSecure: getString('SMTP_SECURE', 'false') === 'true',
+        smtpUsername: getString('SMTP_USERNAME', null),
+        smtpPassword: getString('SMTP_PASSWORD', null),
+        from: getString('SMTP_FROM', null),
+    },
+
+    turnstile: {
+        enabled: getString(
+            'TURNSTILE_ENABLED',
+            getString('NODE_ENV', 'development') === 'production' ? 'true' : 'false'
+        ) === 'true',
+        siteKey: getString('TURNSTILE_SITE_KEY', null),
+        secretKey: getString('TURNSTILE_SECRET_KEY', null),
+        verifyUrl: 'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+        timeoutMs: getNumber('TURNSTILE_TIMEOUT_MS', 5000),
+    },
+
     bcryptSaltRounds: getNumber('BCRYPT_SALT_ROUNDS', 10),
 
     cache: {
@@ -367,7 +387,41 @@ function validateSearchConfig() {
     }
 }
 
+function validateTurnstileConfig() {
+    if (config.turnstile.enabled && (!config.turnstile.siteKey || !config.turnstile.secretKey)) {
+        throw new Error('TURNSTILE_ENABLED requires TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY');
+    }
+
+    if (!Number.isSafeInteger(config.turnstile.timeoutMs) || config.turnstile.timeoutMs <= 0) {
+        throw new Error('TURNSTILE_TIMEOUT_MS must be a positive safe integer');
+    }
+}
+
+function validateEmailConfig() {
+    const emailFields = [
+        config.email.smtpHost,
+        config.email.smtpUsername,
+        config.email.smtpPassword,
+        config.email.from,
+    ];
+    const hasAnyEmailConfig = emailFields.some(Boolean);
+    if (hasAnyEmailConfig &&
+        (!config.email.smtpHost ||
+            !config.email.from ||
+            (!!config.email.smtpUsername !== !!config.email.smtpPassword))) {
+        throw new Error('SMTP_HOST and SMTP_FROM are required; SMTP_USERNAME and SMTP_PASSWORD must be set together');
+    }
+    if (!Number.isSafeInteger(config.email.smtpPort) ||
+        config.email.smtpPort < 1 ||
+        config.email.smtpPort > 65535) {
+        throw new Error('SMTP_PORT must be an integer between 1 and 65535');
+    }
+
+}
+
 validateProviderCredentials();
+validateTurnstileConfig();
+validateEmailConfig();
 validateTokenSecretsAreDistinct();
 validateLoggingConfig();
 validateSearchConfig();

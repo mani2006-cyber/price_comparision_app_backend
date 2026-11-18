@@ -130,12 +130,26 @@ See `.env.example` for the full list with defaults. The ones worth knowing about
 | `LOG_TO_FILE` | Enables persistent JSON logs (default `true`; automatically defaults to `false` in tests). Console logging remains enabled either way. |
 | `LOG_DIRECTORY` | Directory for persistent logs (default `logs/`, relative to the working directory). |
 | `LOG_MAX_FILE_SIZE_BYTES` / `LOG_RETENTION_FILES` | Maximum size of each active log (default 10 MiB) and number of rotated backups to retain per log (default 5). |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` | SMTP delivery for email MFA and password recovery. For Gmail, use `smtp.gmail.com`, port `587`, `SMTP_SECURE=false`, the full Gmail address as username/from, and a Google App Password (without grouping spaces). Username and password must either both be set or both be empty. |
+| `TURNSTILE_ENABLED` / `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` / `TURNSTILE_TIMEOUT_MS` | Cloudflare Turnstile protection for signup/login. Enabled by default in production; development and tests default to disabled. The site key is public; keep the secret key server-side. |
+
+Never commit `.env` or expose SMTP passwords and Turnstile secret keys. Revoke and replace any credential that is disclosed.
 
 ### Persistent logs and traffic monitoring
 
 Pino continues to write application logs to the console. Unless `LOG_TO_FILE=false` (or `NODE_ENV=test` without an explicit override), it also writes structured JSON lines to `logs/application.log`, `logs/error.log`, `logs/security.log`, and `logs/access.log`. Each file rotates when it reaches `LOG_MAX_FILE_SIZE_BYTES`; numbered backups up to `LOG_RETENTION_FILES` are retained. The logs directory is created automatically. File-write failures are reported to stderr and do not fail API requests.
 
-`access.log` records inbound request method, normalized endpoint, status, response time, source IP, and request ID. `application.log` also records outbound Axios and Fetch request destinations, methods, statuses, and durations. Authentication audit events are written to `security.log`; errors at error severity and above are copied to `error.log`. Request bodies, query strings, credentials, cookies, tokens, API keys, and common personal-information fields are excluded or redacted. Source IPs are retained in access/security events for operational monitoring.
+`access.log` records inbound request timestamp, source IP, method, query-free endpoint, status, response time, user agent, request/response body sizes, user ID when authenticated, and request ID. Outbound Axios and Fetch events are marked `direction: "outbound"` and include destination hostname, method, status, duration, and safe error metadata. Inbound events use `direction: "inbound"`. Request/response bodies, query strings, credentials, cookies, tokens, API keys, and common personal-information fields are excluded or redacted. Source IPs are retained in access/security events for operational monitoring.
+
+### Security monitoring dashboard
+
+The separate [`security-monitor/`](./security-monitor/) project provides a live dashboard for request rates, failed logins, suspicious endpoint activity, alerts, and temporary IP-block history. Its agent is integrated into this API: it sends query-free request metadata, login outcomes (account identifiers are keyed hashes), and rejected compare-URL reasons to the monitor using HMAC-signed batches. It does not forward request bodies, passwords, cookies, tokens, or raw login identifiers. If the monitor is unavailable, the main API continues serving requests and queues events for retry.
+
+The monitor's auto-block rules write temporary blocks to its blocklist. The main API only enforces those blocks when `SECURITY_ENFORCE_BLOCKS=true`; enforcement is off by default. Keep it off while testing and use the synthetic scenarios first. Loopback and private-network addresses are allowlisted by the monitor and are never auto-blocked.
+
+To run it locally, follow [`security-monitor/README.md`](./security-monitor/README.md) to start its MySQL/Redis-backed API and dashboard. Configure the monitor backend and this app with the same randomly generated `SERVICE_HMAC_SECRET` (at least 32 characters), a separate `SECURITY_MONITOR_PEPPER`, `SECURITY_MONITOR_ENABLED=true`, and `SECURITY_MONITOR_URL=http://127.0.0.1:5005`. Restart the price-comparison API (default port 4995) after changing `.env`. Leave `SECURITY_ENFORCE_BLOCKS=false` until you have verified the events and blocklist.
+
+For a safe end-to-end check, run `npm run simulate -- brute-force` from `security-monitor/backend`; the synthetic public test address should produce a brute-force alert and temporary block in the dashboard. To verify live ingestion from the actual app, submit several failed `POST /api/auth/login` requests and check the dashboard's Failed Logins/Alerts views. Localhost is allowlisted, so this test must alert but will not block your machine. Detailed steps and reset guidance are in [`security-monitor/TESTING.md`](./security-monitor/TESTING.md).
 
 ## API reference
 
@@ -158,16 +172,24 @@ Every response is JSON with a `success: boolean` field. Errors look like:
 
 ### Auth — `/api/auth`
 
-Rate-limited (`AUTH_RATE_LIMIT_*`), stricter than the app-wide default. `signup`/`login` set an HttpOnly `refreshToken` cookie scoped to `/api/auth`.
+Rate-limited (`AUTH_RATE_LIMIT_*`), stricter than the app-wide default. `signup`/`login` set an HttpOnly `refreshToken` cookie scoped to `/api/auth` after credentials and any configured CAPTCHA/MFA challenges succeed.
 
 | Method | Path | Auth | Body | Response |
 |---|---|---|---|---|
-| POST | `/signup` | — | `{ name, email, password }` | `201` `{ success, user, accessToken }` |
-| POST | `/login` | — | `{ email, password }` | `200` `{ success, user, accessToken }` |
+| POST | `/signup` | — | `{ name, email, password, captchaToken? }` | `201` `{ success, user, accessToken }` |
+| POST | `/login` | — | `{ email, password, captchaToken? }` | `200` with tokens, or `202` `{ success, mfaRequired, challengeToken, expiresInSeconds }` |
+| POST | `/login/mfa` | — | `{ challengeToken, otp }` | `200` `{ success, user, accessToken }` and refresh cookie |
 | POST | `/refresh` | refresh cookie | — | `200` `{ success, accessToken }` — rotates the refresh token too |
 | POST | `/logout` | refresh cookie | — | `200` `{ success, message }` — revokes the refresh token server-side and clears the cookie |
+| POST | `/password/forgot` | — | `{ email }` | `202` generic response whether or not the account exists; emails a reset code when the account exists |
+| POST | `/password/reset` | — | `{ email, otp, password }` | `200`; consumes the one-time code and revokes refresh sessions |
+| POST | `/password/change` | 🔒 | `{ currentPassword, newPassword }` | `200`; revokes refresh sessions and clears the cookie |
+| POST | `/mfa/email/challenge` | 🔒 | `{ password, action: "enable" \| "disable" }` | `202` `{ success, challengeToken, expiresInSeconds }` |
+| POST | `/mfa/email/verify` | 🔒 | `{ challengeToken, otp }` | `200` `{ success, emailMfaEnabled }` |
 
-`user` never includes `password`. `email` must be a valid email format; `password` is not trimmed (a leading/trailing space is part of the password, not a mistake to silently correct).
+`user` never includes `password`. `email` must be a valid email format; `password` is not trimmed (a leading/trailing space is part of the password, not a mistake to silently correct). Email MFA is opt-in: enable it through the authenticated challenge/verify routes; login then requires a six-digit email OTP (five attempts, five-minute expiry) before issuing either token. Turnstile is required for signup/login in production by default; configure `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY`, and have the client send the widget token as `captchaToken` with the matching `signup` or `login` action. In development it is disabled unless `TURNSTILE_ENABLED=true`.
+
+Email MFA and password recovery require SMTP configuration (`SMTP_HOST`, `SMTP_FROM`, and optionally the paired `SMTP_USERNAME`/`SMTP_PASSWORD`). For Gmail, use a Google App Password rather than the account password; enter the 16-character value without the spaces Google uses to group it. Password recovery sends a six-digit OTP that expires in five minutes and allows at most five attempts. Submit `{ email, otp, password }` to `POST /api/auth/password/reset`; the backend does not serve a `GET /reset-password` page, so the client should present a code-entry form and call these API routes. Reset requests intentionally return the same response for known and unknown emails. Login, logout, refresh-token reuse, MFA, password-change, and account-recovery events are written to `security.log` without credentials or one-time codes. Refresh tokens rotate on use; replaying a revoked token triggers reuse detection and revokes all active refresh sessions for that user, requiring a fresh login.
 
 ### Search & products — `/api`
 
@@ -183,7 +205,7 @@ Rate-limited (`AUTH_RATE_LIMIT_*`), stricter than the app-wide default. `signup`
 - If `Authorization` is present, the search is **always** recorded to that user's search history — a repeat identical search still records a hit (bumping `searchCount` on the same history row) even when the underlying data came from cache; see [Caching](#caching) for why this is no longer a tradeoff the way it used to be.
 - `platform` is accepted and recorded to search history, but does **not** currently filter results — every marketplace is always searched.
 - `page`/`limit` paginate the response (default `page=1`, `limit=20`, capped at `limit=50`) — but **not** the underlying fetch: every active marketplace is always searched and the full merged result set is cached under the query text alone (see [Caching](#caching)), so requesting page 2 of an already-searched query is a cache hit, same shared fetch as page 1. `resultCount` is always the **total** across every page (also what gets recorded to search history), never just the current page's size.
-- `POST /compare-url` is rate-limited (`COMPARE_RATE_LIMIT_*`, default 10 requests/minute — scraping-heavy). `url` must be a well-formed URL from a supported marketplace, or this returns `400` naming the marketplaces it does recognize. `page`/`limit` arrive as **query** params (`?page=2&limit=10`), not in the body — the body is reserved for `url`.
+- `POST /compare-url` is rate-limited (`COMPARE_RATE_LIMIT_*`, default 10 requests/minute — scraping-heavy). `url` must be an HTTPS URL on a supported marketplace's exact domain or subdomain; local/private DNS destinations, non-default ports, and unsupported redirects are rejected. Product-page fetches connect directly (not through a proxy), use a shared timeout, a 5 MiB response cap, and a five-redirect limit so hostname checks apply to the connected IP. `page`/`limit` arrive as **query** params (`?page=2&limit=10`), not in the body — the body is reserved for `url`.
 - `result.similarProducts[]` — related items ranked by **title similarity alone**, no price gate, no spec-match requirement, and unlike `results[]`, **any** marketplace including the same one as the original. This is what a same-marketplace variant (a different color/storage option) or a related accessory falls into — genuinely similar, just not a valid cross-retailer price comparison, so it's never mixed into `results[]`. Each entry carries a `similarityScore` (0–1) but no `isOriginal` flag. Never overlaps with `results[]` — anything already surfaced as a price-comparison match is excluded here.
   - **Paginated**: `similarProductsPage`/`similarProductsLimit`/`similarProductsTotal`/`similarProductsTotalPages` (default `page=1`, `limit=6`, capped at `limit=20` via `SIMILAR_PRODUCTS_MAX_LIMIT`). `similarProductsTotal` reflects the full underlying pool (up to `MAX_SIMILAR_PRODUCTS`, default 30) computed and cached **once** per URL — pagination itself is applied fresh on every request, cache hit or not, so two callers requesting different pages of the same URL never see each other's page (see [Caching](#caching) for why that split exists).
 - `result.aiSummary` is a short, AI-generated, plain-English take on which listing is the better deal (via OpenRouter, `src/services/aiComparison.service.js`) — **optional**: it's `null` whenever `OPENROUTER_API_KEY` isn't set, there are no genuine cross-marketplace matches, or the call fails/times out/hits the free model's rate limit. It never blocks or fails the rest of the response — the algorithmic `results[]`/`similarityScore` ranking (which decides *which* products are matches in the first place) doesn't depend on it at all. It's generated from `results[]` only, not `similarProducts[]`, and — like the rest of the expensive work — only runs once per URL per cache TTL, regardless of how many different `similarProducts` pages get requested.

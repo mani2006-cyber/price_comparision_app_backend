@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <title>Security Monitor</title>
+  <link rel="stylesheet" href="/dashboard.css">
+  <script src="/config.js" defer></script>
+  <script src="/dashboard.js" defer></script>
+</head>
+<body>
+  <div id="loginScreen" class="login-screen" hidden>
+    <form id="loginForm" class="login-card">
+      <div class="brand-mark" aria-hidden="true">S</div>
+      <p class="eyebrow">PRICE COMPARE · SECURITY</p>
+      <h1>Security Monitor</h1>
+      <p class="muted">Sign in with your dashboard administrator account.</p>
+      <label for="username">Username</label>
+      <input id="username" name="username" autocomplete="username" required maxlength="64">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="200">
+      <p id="loginError" class="error-text" role="alert"></p>
+      <button class="button primary wide" type="submit">Sign in</button>
+      <p class="login-foot">Protected by a short-lived, HTTP-only admin session.</p>
+    </form>
+  </div>
+
+  <div id="dashboard" class="layout" hidden>
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="Security Monitor home">
+        <span class="brand-mark">S</span>
+        <span><strong>Security</strong><small>MONITOR</small></span>
+      </a>
+      <p class="nav-label">MONITORING</p>
+      <nav id="navigation" class="navigation" aria-label="Dashboard sections">
+        <button class="nav-item active" data-view="overview"><span>◫</span> Overview</button>
+        <button class="nav-item" data-view="traffic"><span>⌁</span> Live traffic</button>
+        <button class="nav-item" data-view="events"><span>≡</span> Security events</button>
+        <button class="nav-item" data-view="failed-logins"><span>⌑</span> Failed logins</button>
+        <button class="nav-item" data-view="alerts"><span>△</span> Alerts <b id="navAlertCount" class="nav-count" hidden></b></button>
+        <button class="nav-item" data-view="blocked"><span>⊘</span> Blocked IPs</button>
+      </nav>
+      <p id="adminNavLabel" class="nav-label admin-only" hidden>ADMINISTRATION</p>
+      <nav id="adminNavigation" class="navigation admin-only" aria-label="Administration" hidden>
+        <button class="nav-item" data-view="settings"><span>⚙</span> Detection settings</button>
+        <button class="nav-item" data-view="audit"><span>▤</span> Audit log</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="connection"><i></i><span>Monitor connected</span></div>
+        <p>Events contain request metadata only. Secrets and request bodies are excluded.</p>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="mobile-brand"><span class="brand-mark">S</span><strong>Security Monitor</strong></div>
+        <div class="breadcrumbs"><span>Workspace</span><b>/</b><strong id="pageName">Overview</strong></div>
+        <div class="top-actions">
+          <span id="lastUpdated" class="muted small"></span>
+          <button id="refreshButton" class="button quiet" type="button" aria-label="Refresh data">↻ <span>Refresh</span></button>
+          <div class="user-menu"><span id="userInitial" class="avatar">A</span><span><strong id="userName">Admin</strong><small id="userRole">admin</small></span></div>
+          <button id="logoutButton" class="button quiet" type="button">Sign out</button>
+        </div>
+      </header>
+      <section id="pageContent" class="page-content" aria-live="polite"></section>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </main>
+  </div>
+</body>
+</html>

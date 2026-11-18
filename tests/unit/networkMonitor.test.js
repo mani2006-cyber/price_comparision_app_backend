@@ -17,10 +17,34 @@ describe('networkMonitor', function() {
         expect(logSpy).toHaveBeenCalledWith('Outbound HTTP request success', expect.objectContaining({
             direction: 'outbound',
             method: 'POST',
+            destinationHostname: 'marketplace.example',
             endpoint: 'marketplace.example/products',
             httpStatus: 201,
             outcome: 'success',
         }), 'info');
+
+        logSpy.mockRestore();
+    });
+
+    it('records outbound HTTP failures without logging the full URL or error message', function() {
+        const logSpy = jest.spyOn(logger, 'network').mockImplementation(function() {});
+        const error = Object.assign(new Error('request failed with token=secret'), { code: 'ECONNRESET' });
+
+        networkMonitor.logRequest({
+            url: 'https://user:password@marketplace.example/products?token=secret',
+            method: 'get',
+        }, { status: 503 }, error);
+
+        expect(logSpy).toHaveBeenCalledWith('Outbound HTTP request failure', expect.objectContaining({
+            direction: 'outbound',
+            destinationHostname: 'marketplace.example',
+            endpoint: 'marketplace.example/products',
+            httpStatus: 503,
+            outcome: 'failure',
+            errorName: 'Error',
+            errorCode: 'ECONNRESET',
+        }), 'warn');
+        expect(logSpy.mock.calls[0][1]).not.toHaveProperty('errorMessage');
 
         logSpy.mockRestore();
     });

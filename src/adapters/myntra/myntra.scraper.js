@@ -9,10 +9,10 @@
 
 'use strict';
 
-const axios = require('axios');
 const cheerio = require('cheerio');
 const logger = require('../../utils/logger');
 const config = require('../../config/env');
+const { safeGet } = require('../shared/safeMarketplaceRequest');
 const { withDefaults, validateProviderProduct, validateProviderProductList } = require('../provider.interface');
 
 const BASE = 'https://www.myntra.com';
@@ -28,11 +28,10 @@ function getHeaders(referer) {
 }
 
 async function fetchHtml(url, referer) {
-    const response = await axios.get(url, {
+    const response = await safeGet(url, {
         headers: getHeaders(referer),
         timeout: config.scraper.timeoutMs,
         decompress: true,
-        maxRedirects: 5,
     });
     return response.data;
 }

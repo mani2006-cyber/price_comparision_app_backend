@@ -60,9 +60,18 @@ describe('getAdapter', function() {
 describe('detectMarketplaceFromUrl', function() {
     it.each([
         ['https://www.nykaa.com/some-product/p/123456', 'nykaa'],
+        ['https://shop.amazon.in/some-product', 'amazon'],
         ['https://www.poorvika.com/apple-iphone-16/p', 'poorvika'],
         ['https://www.vijaysales.com/p/P1/1/apple-iphone-16', 'vijaysales'],
         ['https://www.amazon.in/dp/B0ABCDEFG', 'amazon'],
+        ['https://amazon.in.evil.example/dp/B0ABCDEFG', null],
+        ['https://www.amazon.in.evil.example/dp/B0ABCDEFG', null],
+        ['http://www.amazon.in/dp/B0ABCDEFG', null],
+        ['ftp://www.amazon.in/dp/B0ABCDEFG', null],
+        ['https://www.amazon.in:8443/dp/B0ABCDEFG', null],
+        ['https://user:pass@www.amazon.in/dp/B0ABCDEFG', null],
+        ['https://127.0.0.1/dp/B0ABCDEFG', null],
+        ['https://localhost/dp/B0ABCDEFG', null],
         ['https://www.ebay.com/itm/123', null],
     ])('resolves %s -> %s', function(url, expected) {
         expect(adapters.detectMarketplaceFromUrl(url)).toBe(expected);
@@ -137,8 +146,20 @@ describe('searchByLink', function() {
 
     it('throws ApiError.badRequest for an unsupported url', async function() {
         await expect(adapters.searchByLink('https://www.ebay.com/itm/123')).rejects.toThrow(
-            /Could not detect a supported marketplace/
+            /valid HTTPS URL from a supported marketplace/
         );
+    });
+
+    it('does not delegate lookalike or local URLs to any marketplace adapter', async function() {
+        await expect(adapters.searchByLink('https://amazon.in.evil.example/dp/123')).rejects.toMatchObject({
+            statusCode: 400,
+        });
+        await expect(adapters.searchByLink('https://localhost/dp/123')).rejects.toMatchObject({
+            statusCode: 400,
+        });
+
+        expect(amazon.searchByLink).not.toHaveBeenCalled();
+        expect(flipkart.searchByLink).not.toHaveBeenCalled();
     });
 
     function fakeProductForLink() {

@@ -8,10 +8,10 @@
 
 'use strict';
 
-const axios = require('axios');
 const cheerio = require('cheerio');
 const logger = require('../../utils/logger');
 const config = require('../../config/env');
+const { safeGet } = require('../shared/safeMarketplaceRequest');
 const { withDefaults, validateProviderProduct, validateProviderProductList } = require('../provider.interface');
 
 const BASE = 'https://www.flipkart.com';
@@ -25,7 +25,7 @@ function getHeaders() {
 }
 
 async function fetchHtml(url) {
-    const response = await axios.get(url, {
+    const response = await safeGet(url, {
         headers: getHeaders(),
         timeout: config.scraper.timeoutMs,
     });

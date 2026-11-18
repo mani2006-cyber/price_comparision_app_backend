@@ -1,10 +1,9 @@
 // src/models/RefreshToken.model.js
 //
 // Stores a HASH of each issued refresh token (never the raw value),
-// tied to a user, enabling revocation and rotation that a stateless JWT
-// alone cannot provide. A TTL index auto-deletes expired documents -
-// no cleanup job needed. replacedByTokenId tracks rotation chains for
-// future reuse-detection hardening.
+// tied to a user, enabling revocation, rotation, and reuse detection
+// that a stateless JWT alone cannot provide. A TTL index auto-deletes
+// expired documents - no cleanup job needed.
 
 'use strict';
 
@@ -34,9 +33,8 @@ const refreshTokenSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
-    // Set when this token is rotated out for a new one - builds an
-    // auditable chain, enabling future "detect reuse of an already-
-    // rotated token, revoke the whole chain" hardening.
+    // Set when this token is rotated out for a new one, preserving an
+    // auditable chain alongside the revoked-token reuse check.
     replacedByTokenId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'RefreshToken',

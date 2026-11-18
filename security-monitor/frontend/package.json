@@ -1,0 +1,11 @@
+{
+  "name": "security-monitor-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "test": "node ../../node_modules/jest/bin/jest.js --runInBand --config ../jest.config.js"
+  },
+  "engines": { "node": ">=18" }
+}

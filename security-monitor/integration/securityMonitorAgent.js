@@ -1,0 +1,189 @@
+'use strict';
+/**
+ * securityMonitorAgent.js - the ONLY file added to your existing Price Comparison backend (port 4995).
+ * Zero dependencies (needs Node 18+ for global fetch). See INTEGRATION.md for the exact edits.
+ *
+ * What it does
+ *  - Records one small event per request (method, normalized path, status, duration, IP, user-agent).
+ *    It NEVER reads or sends bodies, headers, cookies, tokens or query strings.
+ *  - Queues events in memory (never blocks a response), sends HMAC-signed batches every ~1s.
+ *  - If the monitor is down it spools events to a local file and retries with backoff (size-capped).
+ *  - Optionally enforces the monitor's block list (SECURITY_ENFORCE_BLOCKS=true). Fails OPEN if the monitor is unreachable.
+ *
+ * Env: SECURITY_MONITOR_URL (default http://127.0.0.1:5005), SERVICE_HMAC_SECRET (same value as the monitor),
+ *      SECURITY_ENFORCE_BLOCKS (default false), SECURITY_MONITOR_PEPPER (secret used to hash login identifiers),
+ *      SECURITY_MONITOR_SPOOL (spool file path), SECURITY_MONITOR_ENABLED (default true)
+ */
+const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const cfg = {
+  url: (process.env.SECURITY_MONITOR_URL || 'http://127.0.0.1:5005').replace(/\/$/, ''),
+  secret: process.env.SERVICE_HMAC_SECRET || process.env.SECURITY_MONITOR_SECRET || '',
+  pepper: process.env.SECURITY_MONITOR_PEPPER || process.env.SERVICE_HMAC_SECRET || '',
+  enforce: process.env.SECURITY_ENFORCE_BLOCKS === 'true',
+  enabled: process.env.SECURITY_MONITOR_ENABLED !== 'false',
+  spoolFile: process.env.SECURITY_MONITOR_SPOOL || path.join(os.tmpdir(), 'security-monitor-spool.jsonl'),
+  spoolMaxBytes: 10 * 1024 * 1024,
+  queueMax: 5000,
+  batchSize: 50,
+  flushMs: 1000,
+  blocklistMs: 5000,
+  timeoutMs: 3000,
+};
+
+const queue = [];
+let dropped = 0;
+let blockSet = new Map(); // ip -> expiresAt(ms)
+let backoffUntil = 0;
+let backoffMs = 1000;
+let flushing = false;
+let started = false;
+
+/* ------------------------------ signing / transport ------------------------------ */
+function signedHeaders(method, urlPath, bodyBuf) {
+  const ts = String(Date.now());
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const bodyHash = crypto.createHash('sha256').update(bodyBuf).digest('hex');
+  const signature = crypto.createHmac('sha256', cfg.secret).update(`${ts}\n${nonce}\n${method}\n${urlPath}\n${bodyHash}`).digest('hex');
+  return { 'x-sm-timestamp': ts, 'x-sm-nonce': nonce, 'x-sm-signature': signature };
+}
+
+async function call(method, urlPath, bodyObj) {
+  const body = bodyObj ? Buffer.from(JSON.stringify(bodyObj)) : Buffer.alloc(0);
+  const res = await fetch(cfg.url + urlPath, {
+    method, body: body.length ? body : undefined,
+    headers: { 'content-type': 'application/json', ...signedHeaders(method, urlPath, body) },
+    signal: AbortSignal.timeout(cfg.timeoutMs),
+  });
+  if (!res.ok) { const e = new Error(`monitor responded ${res.status}`); e.status = res.status; throw e; }
+  return res.json();
+}
+
+/* ------------------------------ disk spool ------------------------------ */
+function spoolAppend(events) {
+  try {
+    fs.appendFileSync(cfg.spoolFile, events.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    const size = fs.statSync(cfg.spoolFile).size;
+    if (size > cfg.spoolMaxBytes) { // drop the OLDEST half, count it, report it later
+      const lines = fs.readFileSync(cfg.spoolFile, 'utf8').split('\n').filter(Boolean);
+      const keep = lines.slice(Math.floor(lines.length / 2));
+      dropped += lines.length - keep.length;
+      fs.writeFileSync(cfg.spoolFile, keep.join('\n') + '\n');
+    }
+  } catch { dropped += events.length; }
+}
+
+function spoolTake(max) {
+  try {
+    if (!fs.existsSync(cfg.spoolFile)) return null;
+    const lines = fs.readFileSync(cfg.spoolFile, 'utf8').split('\n').filter(Boolean);
+    if (!lines.length) return null;
+    return { events: lines.slice(0, max).map((l) => JSON.parse(l)), rest: lines.slice(max) };
+  } catch { return null; }
+}
+const spoolCommit = (rest) => { try { if (rest.length) fs.writeFileSync(cfg.spoolFile, rest.join('\n') + '\n'); else fs.unlinkSync(cfg.spoolFile); } catch { /* ignore */ } };
+
+/* ------------------------------ queue / flush ------------------------------ */
+function push(ev) {
+  if (!cfg.enabled || !cfg.secret) return;
+  if (queue.length >= cfg.queueMax) { queue.shift(); dropped++; }
+  queue.push(ev);
+  if (queue.length >= cfg.batchSize) setImmediate(flush);
+}
+
+async function flush() {
+  if (flushing || Date.now() < backoffUntil) return;
+  flushing = true;
+  try {
+    // 1) older spooled events first, 2) then fresh queue
+    const spooled = spoolTake(100);
+    if (spooled) {
+      await call('POST', '/internal/events', { events: spooled.events });
+      spoolCommit(spooled.rest);
+    }
+    while (queue.length) {
+      const batch = queue.splice(0, 100);
+      try {
+        await call('POST', '/internal/events', { events: batch, dropped: dropped || undefined });
+        dropped = 0;
+      } catch (err) {
+        if (err.status && err.status >= 400 && err.status < 500 && err.status !== 429) { dropped += batch.length; throw err; } // bad batch: do not retry forever
+        spoolAppend(batch);
+        throw err;
+      }
+    }
+    backoffMs = 1000;
+  } catch {
+    backoffUntil = Date.now() + backoffMs;
+    backoffMs = Math.min(backoffMs * 2, 60000);
+  } finally { flushing = false; }
+}
+
+async function refreshBlocklist() {
+  if (!cfg.enforce || !cfg.secret) return;
+  try {
+    const data = await call('GET', '/internal/blocklist');
+    blockSet = new Map(data.items.map((i) => [i.ip, i.expiresAt]));
+  } catch { /* fail open: keep the last known list until it expires naturally */ }
+}
+
+function start() {
+  if (started || !cfg.enabled) return;
+  started = true;
+  if (!cfg.secret) { console.warn('[security-agent] SERVICE_HMAC_SECRET not set - agent disabled'); return; }
+  setInterval(flush, cfg.flushMs).unref();
+  setInterval(refreshBlocklist, cfg.blocklistMs).unref();
+  refreshBlocklist();
+}
+
+const isBlocked = (ip) => { const exp = blockSet.get(ip); if (!exp) return false; if (exp <= Date.now()) { blockSet.delete(ip); return false; } return true; };
+
+/* ------------------------------ public API ------------------------------ */
+/** app.use(agent.middleware()) - put it FIRST (before cors/body parsers) so every request is seen. */
+function middleware() {
+  start();
+  return function securityMonitorAgent(req, res, next) {
+    const startedAt = process.hrtime.bigint();
+    const ip = req.ip || (req.socket && req.socket.remoteAddress) || '';
+    let blocked = false;
+
+    if (cfg.enforce && ip && isBlocked(ip)) {
+      blocked = true;
+      res.status(403).json({ error: 'Forbidden' });
+    }
+
+    let done = false;
+    res.on('close', () => {
+      if (done) return; done = true;
+      const route = req.route && req.route.path ? `${req.baseUrl || ''}${typeof req.route.path === 'string' ? req.route.path : ''}` : undefined;
+      const accept = String(req.headers.accept || '');
+      push({
+        type: 'access', eventId: crypto.randomUUID(), ts: new Date().toISOString(), ip,
+        method: req.method, path: String(req.originalUrl || req.url || '/').split('?')[0].slice(0, 2000),
+        route, routeMatched: !!req.route, status: res.statusCode,
+        durationMs: Number(process.hrtime.bigint() - startedAt) / 1e6,
+        userAgent: String(req.headers['user-agent'] || '').slice(0, 500) || undefined,
+        streaming: accept.includes('text/event-stream') || undefined, blocked: blocked || undefined,
+      });
+    });
+    if (!blocked) next();
+  };
+}
+
+/** Call from your login controller. identifier = email/username (hashed with a secret pepper, never sent in clear). */
+function reportAuth(req, outcome, identifier) {
+  const ev = { type: 'auth', eventId: crypto.randomUUID(), ts: new Date().toISOString(), ip: req.ip || '', outcome, path: String(req.originalUrl || '').split('?')[0].slice(0, 2000) };
+  if (identifier) ev.accountHash = crypto.createHmac('sha256', cfg.pepper).update(String(identifier).trim().toLowerCase()).digest('hex');
+  push(ev);
+}
+
+/** Call from your compare-url validator. reason: 'unsupported_marketplace' | 'invalid_url' | 'ssrf_blocked'. */
+function reportUrlRejected(req, reason, host) {
+  push({ type: 'url_rejected', eventId: crypto.randomUUID(), ts: new Date().toISOString(), ip: req.ip || '', reason,
+    host: host ? String(host).slice(0, 253) : undefined, path: String(req.originalUrl || '').split('?')[0].slice(0, 2000) });
+}
+
+module.exports = { middleware, reportAuth, reportUrlRejected, flush };
