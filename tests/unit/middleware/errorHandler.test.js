@@ -114,10 +114,14 @@ describe('errorHandler', function() {
 
     it('maps an unrecognized error to a generic 500 without leaking its message', function() {
         const res = fakeRes();
+        const securityMonitorAgent = require('../../../src/security/securityMonitorAgent');
+        const reportSpy = jest.spyOn(securityMonitorAgent, 'reportAppError').mockImplementation(function() {});
         errorHandler(new Error('some internal detail'), fakeReq(), res, jest.fn());
 
         expect(res.status).toHaveBeenCalledWith(500);
         expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: 'Something went wrong' }));
+        expect(reportSpy).toHaveBeenCalledWith(expect.any(Object), 500, 'Error');
+        reportSpy.mockRestore();
     });
 
     // ── ZodError branch (added for validate.middleware.js) ─────────────

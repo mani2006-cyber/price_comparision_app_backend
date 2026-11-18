@@ -110,4 +110,61 @@ describe('security monitor agent', function() {
         });
         expect(JSON.stringify(body)).not.toContain('query-value');
     });
+
+    it('forwards sanitized application, outbound, and dependency failure events', async function() {
+        const calls = installFetch();
+        const req = {
+            ip: '203.0.113.13',
+            method: 'GET',
+            originalUrl: '/api/reset/secret-token?email=private@example.com',
+            baseUrl: '/api',
+            route: { path: '/products/:id' },
+            requestId: 'request-123',
+        };
+
+        agent.reportAppError(req, 503, 'ECONNRESET');
+        agent.reportOutboundFailure(
+            'https://marketplace.example.test/product?api_key=private-key',
+            503,
+            123.4,
+            'ERR_BAD_RESPONSE'
+        );
+        agent.reportDependencyState('redis', 'down', 'ECONNREFUSED');
+        await agent.flush();
+
+        const body = JSON.parse(calls[0].options.body.toString());
+        expect(body.events).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'app_error',
+                path: '/api/products/:id',
+                status: 503,
+                requestId: 'request-123',
+                errorCode: 'ECONNRESET',
+            }),
+            expect.objectContaining({
+                type: 'outbound_failure',
+                destinationHost: 'marketplace.example.test',
+                status: 503,
+                durationMs: 123.4,
+            }),
+            expect.objectContaining({
+                type: 'dependency',
+                dependency: 'redis',
+                state: 'down',
+            }),
+        ]));
+        expect(body.events.find((event) => event.type === 'dependency')).not.toHaveProperty('ip');
+        expect(JSON.stringify(body)).not.toContain('secret-token');
+        expect(JSON.stringify(body)).not.toContain('private@example.com');
+        expect(JSON.stringify(body)).not.toContain('private-key');
+    });
+
+    it('does not forward ordinary marketplace 4xx responses', async function() {
+        const calls = installFetch();
+        agent.reportOutboundFailure('https://marketplace.example.test/item', 404, 15, 'ERR_BAD_REQUEST');
+
+        await agent.flush();
+
+        expect(calls).toHaveLength(0);
+    });
 });

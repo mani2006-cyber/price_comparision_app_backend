@@ -228,13 +228,13 @@
   }
 
   function eventRows(items) {
-    return (items || []).map((item) => `<tr><td>${escapeHtml(date(item.timestamp))}</td><td><code>${escapeHtml(item.ip)}</code></td><td>${escapeHtml(item.eventType)}</td><td>${badge(item.severity)}</td><td><code>${escapeHtml(item.endpoint || '—')}</code><span class="description">${escapeHtml(item.description)}</span></td><td>${badge(item.action)}</td></tr>`);
+    return (items || []).map((item) => `<tr><td>${escapeHtml(date(item.timestamp))}</td><td><code>${escapeHtml(item.ip || '—')}</code></td><td>${escapeHtml(item.eventType)}</td><td>${badge(item.severity)}</td><td><code>${escapeHtml(item.endpoint || '—')}</code><span class="description">${escapeHtml(item.description)}</span></td><td>${badge(item.action)}</td></tr>`);
   }
 
   async function renderEvents() {
     const q = state.search || '';
     const data = await api(`/api/security/events?${queryString({ page: state.page, pageSize: 25, q })}`);
-    pageContent.innerHTML = `${heading('Security events', 'Rule detections and authentication audit events.')}<section class="panel"><div class="toolbar"><form id="searchForm"><input class="input" name="q" value="${escapeHtml(q)}" placeholder="Search events" maxlength="100"><button class="button" type="submit">Search</button></form><span class="muted small">${number(data.total)} events</span></div>${table(['Time', 'Source IP', 'Event', 'Severity', 'Details', 'Action'], eventRows(data.items), 'No security events match this filter.')}${pager(data)}</section>`;
+    pageContent.innerHTML = `${heading('Security events', 'Security detections and sanitized application, marketplace, and dependency events.')}<section class="panel"><div class="toolbar"><form id="searchForm"><input class="input" name="q" value="${escapeHtml(q)}" placeholder="Search time, IP, event, severity, details, or action" maxlength="100" aria-label="Search all security event columns"><button class="button" type="submit">Search</button></form><span class="muted small">${number(data.total)} events</span></div>${table(['Time', 'Source IP', 'Event', 'Severity', 'Details', 'Action'], eventRows(data.items), 'No security events match this filter.')}${pager(data)}</section>`;
     bindPager();
     document.getElementById('searchForm').addEventListener('submit', (event) => {
       event.preventDefault();

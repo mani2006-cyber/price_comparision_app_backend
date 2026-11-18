@@ -1,0 +1,1 @@
+ALTER TABLE security_events MODIFY ip VARCHAR(45) NULL;

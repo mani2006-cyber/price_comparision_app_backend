@@ -12,6 +12,7 @@
 const axios = require('axios');
 const logger = require('../../utils/logger');
 const config = require('../../config/env');
+const securityMonitorAgent = require('../../security/securityMonitorAgent');
 
 const TIMEOUT_MS = config.rapidApi.timeoutMs;
 
@@ -34,6 +35,7 @@ async function rapidApiGet(endpoint, params, key, host) {
         throw new RapidApiError('RapidAPI key/host not configured for this endpoint', null, host);
     }
 
+    const startedAt = Date.now();
     try {
         const response = await axios.get(endpoint, {
             params,
@@ -47,6 +49,14 @@ async function rapidApiGet(endpoint, params, key, host) {
 
         return response.data;
     } catch (err) {
+        const status = err.response && err.response.status;
+        securityMonitorAgent.reportOutboundFailure(
+            endpoint,
+            status,
+            Date.now() - startedAt,
+            err.code || (status ? 'UPSTREAM_HTTP_ERROR' : 'NETWORK_ERROR')
+        );
+
         // Distinguish "the request went out and RapidAPI responded with an
         // error status" from "the request never got a response at all"
         // (timeout, DNS failure, connection refused) - useful in logs for

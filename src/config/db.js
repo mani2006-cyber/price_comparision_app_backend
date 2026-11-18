@@ -11,8 +11,27 @@
 const mongoose = require('mongoose');
 const config = require('./env');
 const logger = require('../utils/logger');
+const securityMonitorAgent = require('../security/securityMonitorAgent');
 
 let listenersAttached = false;
+let mongoIsDown = false;
+let intentionalDisconnect = false;
+
+function reportMongoDown(err) {
+    if (mongoIsDown) return;
+    mongoIsDown = true;
+    securityMonitorAgent.reportDependencyState(
+        'mongodb',
+        'down',
+        err && (err.code || err.name)
+    );
+}
+
+function reportMongoRecovered() {
+    if (!mongoIsDown) return;
+    mongoIsDown = false;
+    securityMonitorAgent.reportDependencyState('mongodb', 'recovered');
+}
 
 function attachConnectionListeners() {
     if (listenersAttached) {
@@ -22,14 +41,17 @@ function attachConnectionListeners() {
 
     mongoose.connection.on('error', function(err) {
         logger.error('MongoDB connection error', err);
+        reportMongoDown(err);
     });
 
     mongoose.connection.on('disconnected', function() {
         logger.warn('MongoDB disconnected');
+        if (!intentionalDisconnect) reportMongoDown();
     });
 
     mongoose.connection.on('reconnected', function() {
         logger.info('MongoDB reconnected');
+        reportMongoRecovered();
     });
 }
 
@@ -41,6 +63,7 @@ async function connectDB() {
         logger.info('MongoDB connected', { database: mongoose.connection.name });
     } catch (err) {
         logger.error('MongoDB initial connection failed', err);
+        reportMongoDown(err);
         // Re-throw rather than exiting here — the caller (server.js) decides
         // whether a failed startup connection should crash the process.
         throw err;
@@ -51,8 +74,13 @@ async function disconnectDB() {
     if (mongoose.connection.readyState === 0) {
         return; // already disconnected, nothing to do
     }
-    await mongoose.connection.close();
-    logger.info('MongoDB connection closed');
+    intentionalDisconnect = true;
+    try {
+        await mongoose.connection.close();
+        logger.info('MongoDB connection closed');
+    } finally {
+        intentionalDisconnect = false;
+    }
 }
 
 module.exports = { connectDB, disconnectDB };

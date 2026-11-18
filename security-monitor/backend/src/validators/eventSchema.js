@@ -6,6 +6,8 @@ const { normalizeIp } = require('../utils/ip');
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
 const ip = z.string().max(64).transform((v) => normalizeIp(v)).refine((v) => v !== null, { message: 'invalid ip' });
 const base = { eventId: z.string().min(8).max(64).regex(/^[A-Za-z0-9_-]+$/), ts: z.string().max(40).optional(), ip };
+const systemBase = { ...base, ip: ip.optional() };
+const safeCode = z.string().max(64).regex(/^[A-Za-z0-9_.-]+$/).optional();
 
 const access = z.object({
   type: z.literal('access'), ...base,
@@ -31,8 +33,30 @@ const urlRejected = z.object({
   host: z.string().max(253).optional(),
   path: z.string().max(2048).optional(),
 });
+const appError = z.object({
+  type: z.literal('app_error'), ...systemBase,
+  method: z.string().max(10).transform((s) => s.toUpperCase()).refine((m) => METHODS.includes(m), { message: 'bad method' }),
+  path: z.string().min(1).max(2048).optional(),
+  status: z.number().int().min(500).max(599),
+  requestId: z.string().max(64).regex(/^[A-Za-z0-9_.-]+$/).optional(),
+  errorCode: safeCode,
+});
+const outboundFailure = z.object({
+  type: z.literal('outbound_failure'), ...systemBase,
+  destinationHost: z.string().min(1).max(253).regex(/^[A-Za-z0-9.-]+$/),
+  method: z.literal('GET'),
+  status: z.number().int().min(100).max(599).optional(),
+  durationMs: z.number().min(0).max(1e10),
+  errorCode: safeCode,
+});
+const dependency = z.object({
+  type: z.literal('dependency'), ...systemBase,
+  dependency: z.enum(['mongodb', 'redis']),
+  state: z.enum(['down', 'recovered']),
+  errorCode: safeCode,
+});
 
-const eventSchema = z.discriminatedUnion('type', [access, auth, urlRejected]);
+const eventSchema = z.discriminatedUnion('type', [access, auth, urlRejected, appError, outboundFailure, dependency]);
 const batchSchema = z.object({ events: z.array(z.unknown()).min(1).max(200), dropped: z.number().int().min(0).optional() });
 
 module.exports = { eventSchema, batchSchema };

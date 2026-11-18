@@ -1,7 +1,7 @@
 'use strict';
 /**
  * Event ingestion pipeline (at-least-once delivery + idempotency = no loss, no duplicates):
- *  validate -> dedupe by eventId (Redis NX) -> normalize -> access_logs insert -> stats buckets -> rules -> live feed.
+ *  validate -> dedupe by eventId (Redis NX) -> normalize -> persist -> stats buckets/rules -> live feed.
  * If anything fails after dedupe, the dedupe keys are released so the agent's retry is processed again.
  */
 const { redis } = require('../config/redis');
@@ -12,6 +12,7 @@ const accessRepo = require('../repositories/accessLogs.repo');
 const settingsService = require('./settings.service');
 const statsService = require('./stats.service');
 const ruleEngine = require('./ruleEngine');
+const recordsService = require('./records.service');
 const broadcaster = require('../realtime/broadcaster');
 const logger = require('../utils/logger');
 
@@ -33,6 +34,53 @@ function prepare(ev) {
     return { ...ev, ts, endpoint, kind };
   }
   return { ...ev, ts, endpoint: ev.path ? normalizePath(ev.path) : null };
+}
+
+function operationalRecord(ev) {
+  const common = {
+    ip: ev.ip || null,
+    action: 'LOGGED',
+    meta: { source: 'price-comparison-api' },
+  };
+
+  if (ev.type === 'app_error') {
+    return {
+      ...common,
+      eventType: 'APPLICATION_ERROR',
+      severity: 'HIGH',
+      endpoint: ev.endpoint,
+      description: `HTTP ${ev.status} ${ev.method}${ev.endpoint ? ` ${ev.endpoint}` : ''} failed`,
+      meta: { ...common.meta, requestId: ev.requestId, errorCode: ev.errorCode },
+    };
+  }
+  if (ev.type === 'outbound_failure') {
+    const statusText = ev.status ? `HTTP ${ev.status}` : (ev.errorCode || 'network error');
+    return {
+      ...common,
+      eventType: 'OUTBOUND_HTTP_FAILURE',
+      severity: ev.status >= 500 ? 'HIGH' : 'MEDIUM',
+      endpoint: null,
+      description: `Outbound ${ev.method} to ${ev.destinationHost} failed (${statusText}, ${Math.round(ev.durationMs)} ms)`,
+      meta: {
+        ...common.meta,
+        destinationHost: ev.destinationHost,
+        method: ev.method,
+        status: ev.status,
+        durationMs: Math.round(ev.durationMs),
+        errorCode: ev.errorCode,
+      },
+    };
+  }
+
+  const isDown = ev.state === 'down';
+  return {
+    ...common,
+    eventType: isDown ? 'DEPENDENCY_DOWN' : 'DEPENDENCY_RECOVERED',
+    severity: isDown ? 'HIGH' : 'LOW',
+    endpoint: null,
+    description: `${ev.dependency} dependency ${isDown ? 'unavailable' : 'recovered'}`,
+    meta: { ...common.meta, dependency: ev.dependency, state: ev.state, errorCode: ev.errorCode },
+  };
 }
 
 async function ingest(rawEvents) {
@@ -65,6 +113,11 @@ async function ingest(rawEvents) {
     for (const ev of events) {
       let suspicious = false;
       const stale = now - ev.ts.getTime() > STALE_MS;
+      if (['app_error', 'outbound_failure', 'dependency'].includes(ev.type)) {
+        await recordsService.recordEvent(operationalRecord(ev));
+        acc.add(ev, false);
+        continue;
+      }
       if (!stale && !(ev.type === 'access' && ev.blocked)) ({ suspicious } = await ruleEngine.run(ev, ctx));
       acc.add(ev, suspicious);
       if (ev.type === 'access' && ev.kind !== 'preflight') {

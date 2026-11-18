@@ -6,6 +6,7 @@ const net = require('net');
 const axios = require('axios');
 const config = require('../../config/env');
 const ApiError = require('../../utils/ApiError');
+const securityMonitorAgent = require('../../security/securityMonitorAgent');
 
 const MAX_REDIRECTS = 5;
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
@@ -194,7 +195,9 @@ async function safeGet(value, requestOptions) {
     let currentUrl = validateMarketplaceUrl(value);
     const startedAt = Date.now();
     const controller = new AbortController();
+    let timedOut = false;
     const timeout = setTimeout(function() {
+        timedOut = true;
         controller.abort();
     }, timeoutMs);
     const requestHeaders = Object.assign({}, options.headers || {});
@@ -203,6 +206,7 @@ async function safeGet(value, requestOptions) {
         for (let redirects = 0; ; redirects++) {
             const remainingMs = timeoutMs - (Date.now() - startedAt);
             if (remainingMs <= 0) {
+                timedOut = true;
                 throw ApiError.badGateway('Marketplace request timed out');
             }
 
@@ -270,6 +274,21 @@ async function safeGet(value, requestOptions) {
                 throw unsafeDestinationError(502, 'Marketplace redirected to an unsupported destination');
             }
         }
+    } catch (err) {
+        const unsafeDestination = err && (err.code === 'ERR_UNSAFE_DESTINATION' ||
+            (err.cause && err.cause.code === 'ERR_UNSAFE_DESTINATION'));
+        if (!unsafeDestination) {
+            const status = err && err.response && err.response.status;
+            const errorCode = timedOut ? 'TIMEOUT' :
+                (err && (err.code || (status ? 'UPSTREAM_HTTP_ERROR' : 'NETWORK_ERROR')));
+            securityMonitorAgent.reportOutboundFailure(
+                currentUrl.href,
+                status,
+                Date.now() - startedAt,
+                errorCode
+            );
+        }
+        throw err;
     } finally {
         clearTimeout(timeout);
     }

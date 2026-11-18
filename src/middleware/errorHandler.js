@@ -9,6 +9,7 @@
 const ApiError = require('../utils/ApiError');
 const logger = require('../utils/logger');
 const config = require('../config/env');
+const securityMonitorAgent = require('../security/securityMonitorAgent');
 
 // ── 404 — no route matched ──────────────────────────────────────────────
 function notFoundHandler(req, res, next) {
@@ -97,6 +98,11 @@ function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-va
             requestId: logPayload.requestId,
             sourceIp: logPayload.sourceIp,
         });
+        securityMonitorAgent.reportAppError(
+            req,
+            apiError.statusCode,
+            originalErr && (originalErr.code || originalErr.name)
+        );
     } else {
         logger.warn('Request rejected', Object.assign({ message: apiError.message }, logPayload));
     }

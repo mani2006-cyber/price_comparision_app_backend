@@ -19,7 +19,7 @@ async function topIps({ since, metric = 'requests', limit = 10 }) {
       WHERE event_type = 'FAILED_LOGIN' AND created_at >= ? GROUP BY ip ORDER BY count DESC LIMIT ?`, [since, limit]);
   } else if (metric === 'suspicious') {
     rows = await db.query(`SELECT ip, COUNT(*) AS count, MAX(created_at) AS last_seen FROM security_events
-      WHERE event_type NOT IN ('FAILED_LOGIN','IP_UNBLOCKED') AND created_at >= ? GROUP BY ip ORDER BY count DESC LIMIT ?`, [since, limit]);
+      WHERE ip IS NOT NULL AND event_type NOT IN ('FAILED_LOGIN','IP_UNBLOCKED') AND created_at >= ? GROUP BY ip ORDER BY count DESC LIMIT ?`, [since, limit]);
   } else {
     rows = await db.query(`SELECT ip, COUNT(*) AS count, SUM(status_code >= 400) AS errors, MAX(ts) AS last_seen
       FROM access_logs WHERE ts >= ? AND kind <> 'preflight' GROUP BY ip ORDER BY count DESC LIMIT ?`, [since, limit]);

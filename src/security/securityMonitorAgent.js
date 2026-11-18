@@ -243,4 +243,87 @@ function reportUrlRejected(req, reason, host) {
     });
 }
 
-module.exports = { middleware, reportAuth, reportUrlRejected, flush };
+function safeErrorCode(code) {
+    if (typeof code !== 'string' || !/^[A-Za-z0-9_.-]{1,64}$/.test(code)) {
+        return undefined;
+    }
+    return code;
+}
+
+function reportAppError(req, status, errorCode) {
+    if (!req || !Number.isInteger(status) || status < 500 || status > 599) return;
+
+    const route = req.route && typeof req.route.path === 'string'
+        ? `${req.baseUrl || ''}${req.route.path}`.slice(0, 2000)
+        : undefined;
+    const event = {
+        type: 'app_error',
+        eventId: crypto.randomUUID(),
+        ts: new Date().toISOString(),
+        ip: req.ip || undefined,
+        method: String(req.method || '').toUpperCase(),
+        path: route,
+        status,
+        requestId: safeErrorCode(req.requestId),
+    };
+    const code = safeErrorCode(errorCode);
+    if (code) event.errorCode = code;
+    push(event);
+}
+
+function reportOutboundFailure(destination, status, durationMs, errorCode) {
+    let destinationHost;
+    try {
+        const url = new URL(destination);
+        if (url.protocol !== 'https:') return;
+        destinationHost = url.hostname.toLowerCase();
+    } catch (error) {
+        return;
+    }
+
+    if (!/^[a-z0-9.-]{1,253}$/.test(destinationHost)) return;
+    const statusCode = Number.isInteger(status) && status >= 100 && status <= 599
+        ? status
+        : undefined;
+    if (statusCode && statusCode < 500 && statusCode !== 401 &&
+        statusCode !== 403 && statusCode !== 429) return;
+
+    const event = {
+        type: 'outbound_failure',
+        eventId: crypto.randomUUID(),
+        ts: new Date().toISOString(),
+        destinationHost,
+        method: 'GET',
+        durationMs: Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : 0,
+    };
+    if (statusCode) event.status = statusCode;
+    const code = safeErrorCode(errorCode);
+    if (code) event.errorCode = code;
+    push(event);
+}
+
+function reportDependencyState(dependency, state, errorCode) {
+    if (!['mongodb', 'redis'].includes(dependency) ||
+        !['down', 'recovered'].includes(state)) return;
+
+    const event = {
+        type: 'dependency',
+        eventId: crypto.randomUUID(),
+        ts: new Date().toISOString(),
+        dependency,
+        state,
+    };
+    const code = safeErrorCode(errorCode);
+    if (code) event.errorCode = code;
+    push(event);
+}
+
+module.exports = {
+    middleware,
+    reportAuth,
+    reportUrlRejected,
+    reportAppError,
+    reportOutboundFailure,
+    reportDependencyState,
+    flush,
+};

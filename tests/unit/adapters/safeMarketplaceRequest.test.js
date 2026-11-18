@@ -1,6 +1,7 @@
 'use strict';
 
 const axios = require('axios');
+const securityMonitorAgent = require('../../../src/security/securityMonitorAgent');
 const {
     MAX_REDIRECTS,
     MAX_RESPONSE_BYTES,
@@ -140,5 +141,20 @@ describe('safeGet', function() {
 
         await expect(safeGet('https://www.amazon.in/dp/123')).rejects.toMatchObject({ statusCode: 502 });
         expect(get).toHaveBeenCalledTimes(MAX_REDIRECTS + 1);
+    });
+
+    it('reports a sanitized upstream failure without changing the thrown error', async function() {
+        const error = Object.assign(new Error('upstream unavailable'), { code: 'ECONNRESET' });
+        const get = jest.spyOn(axios, 'get').mockRejectedValue(error);
+        const reportSpy = jest.spyOn(securityMonitorAgent, 'reportOutboundFailure').mockImplementation(function() {});
+
+        await expect(safeGet('https://www.amazon.in/dp/private-token?key=private-value')).rejects.toBe(error);
+
+        expect(reportSpy).toHaveBeenCalledWith(
+            'https://www.amazon.in/dp/private-token?key=private-value',
+            undefined,
+            expect.any(Number),
+            'ECONNRESET'
+        );
     });
 });

@@ -26,6 +26,7 @@
 
 const axios = require('axios');
 const logger = require('../../utils/logger');
+const securityMonitorAgent = require('../../security/securityMonitorAgent');
 const config = require('../../config/env');
 const { safeGet } = require('../shared/safeMarketplaceRequest');
 const { withDefaults, validateProviderProduct, validateProviderProductList } = require('../provider.interface');
@@ -52,12 +53,23 @@ async function fetchHtml(url, referer) {
 }
 
 async function fetchJson(url) {
-    const response = await axios.get(url, {
-        headers: Object.assign(getHeaders(BASE), { Accept: 'application/json' }),
-        timeout: config.scraper.timeoutMs,
-        decompress: true,
-    });
-    return response.data;
+    const startedAt = Date.now();
+    try {
+        const response = await axios.get(url, {
+            headers: Object.assign(getHeaders(BASE), { Accept: 'application/json' }),
+            timeout: config.scraper.timeoutMs,
+            decompress: true,
+        });
+        return response.data;
+    } catch (err) {
+        securityMonitorAgent.reportOutboundFailure(
+            url,
+            err.response && err.response.status,
+            Date.now() - startedAt,
+            err.code || (err.response ? 'UPSTREAM_HTTP_ERROR' : 'NETWORK_ERROR')
+        );
+        throw err;
+    }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────

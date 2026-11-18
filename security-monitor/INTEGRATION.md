@@ -29,5 +29,8 @@ Restart both backends and keep `SECURITY_ENFORCE_BLOCKS=false` while validating.
 - Every inbound request: IP, method, query-free path, status, duration, route-match flag, user agent, and event timestamp.
 - Login successes/failures: outcome and a keyed hash of the normalized email identifier; never the email or password.
 - Rejected compare URLs: rejection category and hostname only, never the submitted URL or query.
+- Application failures: HTTP 5xx status, method, matched route template (when available), request ID, source IP, and a safe error code. Raw messages and stacks are excluded.
+- Selected marketplace request failures: destination hostname, HTTP status when available, duration, and a safe error code. Successful calls and routine 4xx responses are not forwarded; URL paths, query strings, and credentials are excluded.
+- MongoDB and Redis state transitions: dependency name, down/recovered state, and an optional safe error code. These system events have no client IP.
 
-Request bodies, headers, cookies, access/refresh tokens, and raw login identifiers are never sent. Batches are HMAC-signed and retried with a bounded local spool when the monitor is unavailable. Requests continue if the monitor is down. Auto-blocks are only enforced by the main API when `SECURITY_ENFORCE_BLOCKS=true`; loopback/private IPs are allowlisted.
+Request bodies, headers, cookies, access/refresh tokens, raw login identifiers, raw error messages/stacks, full outbound URLs, and query strings are never sent. Operational events appear in the monitor's Security Events view; events without a client IP show `—`. Batches are HMAC-signed and retried with a bounded local spool when the monitor is unavailable. Requests continue if the monitor is down. Auto-blocks are only enforced by the main API when `SECURITY_ENFORCE_BLOCKS=true`; loopback/private IPs are allowlisted.

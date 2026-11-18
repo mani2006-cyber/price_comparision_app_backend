@@ -12,6 +12,7 @@ const axios = require('axios');
 const { safeGet } = require('../shared/safeMarketplaceRequest');
 const cheerio = require('cheerio');
 const logger = require('../../utils/logger');
+const securityMonitorAgent = require('../../security/securityMonitorAgent');
 const config = require('../../config/env');
 const { withDefaults, validateProviderProduct, validateProviderProductList } = require('../provider.interface');
 
@@ -77,6 +78,7 @@ async function warmUpCookies(force) {
     if (!force && cachedCookie && Date.now() - cookieFetchedAt < 10 * 60 * 1000) {
         return cachedCookie;
     }
+    const startedAt = Date.now();
     try {
         const res = await axios.get(BASE + '/', buildAxiosOptions(''));
         const setCookie = res.headers['set-cookie'] || [];
@@ -86,6 +88,12 @@ async function warmUpCookies(force) {
         cookieFetchedAt = Date.now();
     } catch (err) {
         cachedCookie = '';
+        securityMonitorAgent.reportOutboundFailure(
+            BASE + '/',
+            err.response && err.response.status,
+            Date.now() - startedAt,
+            err.code || (err.response ? 'UPSTREAM_HTTP_ERROR' : 'NETWORK_ERROR')
+        );
     }
     return cachedCookie;
 }

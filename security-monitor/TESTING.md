@@ -54,6 +54,8 @@ Then refresh **Failed Logins** and **Alerts**. You should see the failures plus 
 
 You can also send several requests to an unsupported compare URL to exercise URL-rejection telemetry; do not use a real internal/private service URL. The submitted URL is not forwarded to the monitor.
 
+Sanitized application 5xx errors, selected marketplace request failures, and MongoDB/Redis down/recovered transitions are shown in **Security Events** when those conditions occur. Successful marketplace calls and routine upstream 4xx responses are intentionally omitted; avoid stopping production dependencies just to generate test events.
+
 ## 5. Verify temporary blocking safely
 
 The synthetic `brute-force`, `scan`, or `rate` scenarios should add a non-private test address to the monitor blocklist. By default, the main API only reports events and **does not enforce** blocks. To check enforcement safely, use a test client/IP that is not allowlisted and never your own loopback/private IP. Set `SECURITY_ENFORCE_BLOCKS=true` only after verifying the blocklist and confirming your own administration IP is allowlisted; restart the main API. Set it back to `false` to stop enforcement.

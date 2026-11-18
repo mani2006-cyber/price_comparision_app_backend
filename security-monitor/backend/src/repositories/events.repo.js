@@ -28,7 +28,20 @@ async function search({ from, to, severity, eventType, ip, q, page = 1, pageSize
   if (severity && severity.length) { where.push('severity IN (?)'); params.push(severity); }
   if (eventType && eventType.length) { where.push('event_type IN (?)'); params.push(eventType); }
   if (ip) { where.push('ip LIKE ?'); params.push(`${escapeLike(ip)}%`); }
-  if (q) { where.push('(description LIKE ? OR endpoint LIKE ?)'); params.push(`%${escapeLike(q)}%`, `%${escapeLike(q)}%`); }
+  if (q) {
+    const search = `%${escapeLike(q)}%`;
+    where.push(`(
+      DATE_FORMAT(created_at, '%d/%m/%Y, %H:%i:%s') LIKE ? OR
+      CAST(created_at AS CHAR) LIKE ? OR
+      COALESCE(ip, '') LIKE ? OR
+      event_type LIKE ? OR
+      severity LIKE ? OR
+      COALESCE(endpoint, '') LIKE ? OR
+      description LIKE ? OR
+      action LIKE ?
+    )`);
+    params.push(search, search, search, search, search, search, search, search);
+  }
   const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const [{ total }] = await db.query(`SELECT COUNT(*) AS total FROM security_events ${w}`, params);
   const rows = await db.query(`SELECT * FROM security_events ${w} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,

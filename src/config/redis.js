@@ -13,6 +13,7 @@
 const Redis = require('ioredis');
 const config = require('./env');
 const logger = require('../utils/logger');
+const securityMonitorAgent = require('../security/securityMonitorAgent');
 
 let client = null;
 let hasLoggedDownState = false;
@@ -37,12 +38,18 @@ if (config.redis.enabled) {
         if (!hasLoggedDownState) {
             logger.warn('Redis connection error - caching disabled until it recovers', { message: err.message });
             hasLoggedDownState = true;
+            securityMonitorAgent.reportDependencyState(
+                'redis',
+                'down',
+                err && (err.code || err.name)
+            );
         }
     });
 
     client.on('ready', function() {
         if (hasLoggedDownState) {
             logger.info('Redis reconnected - caching re-enabled');
+            securityMonitorAgent.reportDependencyState('redis', 'recovered');
         } else {
             logger.info('Redis connected');
         }
